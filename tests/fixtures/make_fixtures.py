@@ -52,18 +52,20 @@ def write_text_layer_pdf(path: Path) -> None:
             f"<< /Length {len(stream)} >>\nstream\n".encode() + stream + b"endstream"
         )
 
-    out = bytearray(b"%PDF-1.4\n")
-    offsets = {}
+    pdf_bytes = bytearray(b"%PDF-1.4\n")
+    object_offsets = {}
     for number in sorted(objects):
-        offsets[number] = len(out)
-        out += f"{number} 0 obj\n".encode() + objects[number] + b"\nendobj\n"
-    xref_offset = len(out)
-    size = max(objects) + 1
-    out += f"xref\n0 {size}\n0000000000 65535 f \n".encode()
-    for number in range(1, size):
-        out += f"{offsets[number]:010d} 00000 n \n".encode()
-    out += f"trailer\n<< /Size {size} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n".encode()
-    path.write_bytes(bytes(out))
+        object_offsets[number] = len(pdf_bytes)
+        pdf_bytes += f"{number} 0 obj\n".encode() + objects[number] + b"\nendobj\n"
+    xref_offset = len(pdf_bytes)
+    xref_size = max(objects) + 1
+    pdf_bytes += f"xref\n0 {xref_size}\n0000000000 65535 f \n".encode()
+    for number in range(1, xref_size):
+        pdf_bytes += f"{object_offsets[number]:010d} 00000 n \n".encode()
+    pdf_bytes += (
+        f"trailer\n<< /Size {xref_size} /Root 1 0 R >>\nstartxref\n{xref_offset}\n%%EOF\n"
+    ).encode()
+    path.write_bytes(bytes(pdf_bytes))
 
 
 def write_image_only_pdf(path: Path) -> None:
