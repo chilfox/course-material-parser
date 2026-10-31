@@ -10,7 +10,6 @@ Spec: GitHub issue #10.
 - `uv run ruff check . && uv run ruff format --check .`: lint and format check.
 - `uv run pytest -m docling`: opt-in real Docling smoke test.
   It needs the models from `uv run docling-tools models download`.
-  Until the `docling_conversion` module lands, no test carries the marker, so this exits 5 ("no tests collected").
 
 ## Agent skills
 
