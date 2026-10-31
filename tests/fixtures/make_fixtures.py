@@ -8,6 +8,7 @@ this only needs to run when a fixture must change.
   layer, so it looks scanned to the text-layer pre-check.
 """
 
+import time
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
@@ -73,7 +74,9 @@ def write_image_only_pdf(path: Path) -> None:
     draw = ImageDraw.Draw(image)
     draw.text((100, 100), "Scanned fixture page", fill=0, font=ImageFont.load_default(40))
     draw.text((100, 170), "This page has no text layer.", fill=0, font=ImageFont.load_default(24))
-    image.save(path, "PDF", resolution=dpi)
+    # A fixed timestamp keeps regeneration byte-identical, so unchanged fixtures never show diffs.
+    fixed_date = time.gmtime(0)
+    image.save(path, "PDF", resolution=dpi, creationDate=fixed_date, modDate=fixed_date)
 
 
 if __name__ == "__main__":
