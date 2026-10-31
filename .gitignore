@@ -1,1 +1,11 @@
 .DS_Store
+
+# Python / uv
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# Local settings (copy settings.example.toml)
+settings.toml
