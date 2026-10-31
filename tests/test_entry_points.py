@@ -1,3 +1,5 @@
+"""The installed console scripts run from any working directory."""
+
 import subprocess
 from pathlib import Path
 

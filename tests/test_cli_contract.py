@@ -1,3 +1,5 @@
+"""CLI seam: the shared output contract, settings errors, and help text of both CLIs."""
+
 import subprocess
 import sys
 
@@ -100,3 +102,22 @@ def test_the_reader_never_imports_docling(run_parse, settings_path):
 
     assert result.returncode == 0, result.stderr
     assert "<page 1>" in result.stdout
+
+
+def test_an_unknown_device_is_a_settings_error_before_anything_is_created(
+    run_parse, settings_path, library
+):
+    settings_path.write_text(f'library_root = "{library}"\ndevice = "tpu"\n')
+
+    result = run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", "m", "--type", "slides")
+
+    assert_error(result, "settings_error")
+    assert "device" in result.error["message"]
+    assert list(library.iterdir()) == []
+
+
+def test_an_unexpected_failure_is_reported_as_internal_error(run_parse, run_read, library):
+    run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", "deck", "--type", "slides")
+    (library / "deck" / "material.json").write_text("{not json")
+
+    assert_error(run_read("get", "--source", "deck"), "internal_error")

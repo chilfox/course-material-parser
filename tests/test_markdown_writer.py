@@ -1,3 +1,5 @@
+"""markdown_writer seam: DoclingDocument plus selector in, page-marked Markdown out."""
+
 from doc_builders import slide_deck
 
 from course_material_parser.markdown_writer import PdfPages, write_markdown
