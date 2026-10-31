@@ -47,5 +47,6 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "D"]
 convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
-# Tests document behaviour through their names.
-"tests/**" = ["D"]
+# Test modules need docstrings like every module; test functions and fixtures document
+# behaviour through their names.
+"tests/**" = ["D102", "D103", "D105", "D107"]

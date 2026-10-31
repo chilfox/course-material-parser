@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from course_material_parser import material_store
-from course_material_parser.cli_output import JsonArgumentParser, run_cli, to_json
+from course_material_parser.cli_output import JsonArgumentParser, json_line, run_cli
 from course_material_parser.settings import Settings, load_settings
 
 _DESCRIPTION = """\
@@ -42,7 +42,7 @@ def _run(argv: Sequence[str] | None, settings_path: Path | None) -> str:
     args = _build_parser().parse_args(argv)
     settings = load_settings(settings_path)
     if args.command == "list":
-        return to_json(_list(settings)) + "\n"
+        return json_line(_list(settings))
     return _get(settings, args.source)
 
 
@@ -69,7 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _list(settings: Settings) -> dict:
     return {
         "materials": [
-            {"source": m.source, "type": m.record.type, "pages": m.record.pages}
+            {"source": m.material_id, "type": m.record.type, "pages": m.record.pages}
             for m in material_store.ready_materials(settings.library_root)
         ]
     }
@@ -77,5 +77,4 @@ def _list(settings: Settings) -> dict:
 
 def _get(settings: Settings, source: str) -> str:
     material = material_store.get_ready_material(settings.library_root, source)
-    slides = material.path / material_store.CONTENTS_DIR / material_store.SLIDES_FILE
-    return slides.read_text(encoding="utf-8")
+    return material_store.slides_markdown(material.path).read_text(encoding="utf-8")

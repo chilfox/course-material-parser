@@ -1,3 +1,5 @@
+"""CLI seam: a slide deck is parsed into ready material and read back."""
+
 import json
 
 from conftest import TEXT_LAYER_PDF

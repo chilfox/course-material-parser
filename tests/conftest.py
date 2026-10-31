@@ -1,7 +1,7 @@
 """Shared fixtures for the CLI seam: a temporary library, its settings file, and runners."""
 
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -29,10 +29,12 @@ class CliResult:
 
     @property
     def json(self):
+        """The JSON result printed on stdout."""
         return json.loads(self.stdout)
 
     @property
     def error(self):
+        """The JSON error envelope printed on stderr."""
         return json.loads(self.stderr)
 
 
@@ -46,10 +48,9 @@ class FakeConverter:
     document: DoclingDocument | None = None
     failure: str | None = None
     partial: bool = False
-    calls: list[dict] = field(default_factory=list)
 
     def convert(self, pdf: Path, *, device: str, ocr: bool):
-        self.calls.append({"pdf": pdf, "device": device, "ocr": ocr})
+        """Return the configured outcome without looking at the PDF."""
         if self.failure is not None and self.partial:
             return PartiallyConverted(document=self.document, message=self.failure)
         if self.failure is not None:
@@ -82,21 +83,23 @@ def converter() -> FakeConverter:
     )
 
 
-@pytest.fixture
-def run_parse(capsys, settings_path, converter):
+def _runner(capsys, main):
     def run(*argv: str) -> CliResult:
-        exit_code = parse_command.main(list(argv), settings_path=settings_path, converter=converter)
+        exit_code = main(list(argv))
         captured = capsys.readouterr()
         return CliResult(exit_code, captured.out, captured.err)
 
     return run
+
+
+@pytest.fixture
+def run_parse(capsys, settings_path, converter):
+    return _runner(
+        capsys,
+        lambda argv: parse_command.main(argv, settings_path=settings_path, converter=converter),
+    )
 
 
 @pytest.fixture
 def run_read(capsys, settings_path):
-    def run(*argv: str) -> CliResult:
-        exit_code = read_command.main(list(argv), settings_path=settings_path)
-        captured = capsys.readouterr()
-        return CliResult(exit_code, captured.out, captured.err)
-
-    return run
+    return _runner(capsys, lambda argv: read_command.main(argv, settings_path=settings_path))
