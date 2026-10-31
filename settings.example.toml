@@ -1,0 +1,24 @@
+# Settings for the course material parser skill.
+# Copy this file to settings.toml in the same directory (the skill directory) and edit it.
+# settings.toml is git-ignored. Unknown keys and invalid values are reported as errors.
+
+# Required. Absolute path ("~" is expanded) to an existing directory. All parsed
+# material is stored under it, and a material id is a folder path relative to it,
+# for example "ml/prml".
+library_root = "~/course-library"
+
+# Required. Hardware Docling runs on, one of "cpu", "mps", "cuda". It is never chosen
+# automatically, and a device that isn't available is reported as an error.
+#   Apple Silicon macOS:       "mps" (the formula model still runs on CPU, because
+#                              Docling doesn't support MPS for it)
+#   Linux with an NVIDIA GPU:  "cuda"
+#   Linux without a GPU:       "cpu" (works, but long textbooks are slow)
+device = "mps"
+
+# Optional, default true. Set to false to forbid OCR on this machine. A PDF that looks
+# scanned is then refused instead of being parsed with OCR.
+allow_ocr = true
+
+# Optional, default 60000. Positive integer. A chapter read larger than this many
+# characters returns "too_large" unless the agent re-runs it with --confirm.
+combined_read_max_chars = 60000
