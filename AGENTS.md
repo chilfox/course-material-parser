@@ -2,7 +2,6 @@
 
 A local agent skill (the repository root is the skill directory) that parses course PDFs (lecture slides and textbooks) with Docling into parsed material.
 It gives agents two CLIs, `parse` and `read`, to create and read that material.
-Spec: GitHub issue #10.
 
 ## Testing
 
