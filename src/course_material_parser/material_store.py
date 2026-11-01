@@ -7,6 +7,7 @@ this one for paths instead of building them, so the layout lives in one place.
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import asdict, dataclass
 from enum import StrEnum
@@ -19,6 +20,9 @@ _METADATA_FILE = "material.json"
 _SOURCE_PDF = "source.pdf"
 _CONTENTS_DIR = "contents"
 _SLIDES_FILE = "slides.md"
+# One folder name: letters, digits, ".", "_", "-", not starting with "." (so ".", "..",
+# and hidden folders, which discovery skips, are impossible).
+_SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
 
 
 class MaterialType(StrEnum):
@@ -64,22 +68,58 @@ def slides_markdown(material_dir: Path) -> Path:
     return material_dir / _CONTENTS_DIR / _SLIDES_FILE
 
 
+def check_destination(library_root: Path, material_id: str) -> Path:
+    """Check that ``material_id`` names a new material folder and return its path.
+
+    Nothing is created or modified. The id must be a relative path of ``/``-separated
+    folder names made of letters, digits, ``.``, ``_``, and ``-``, none starting with
+    ``.``, so it can never escape ``library_root``.
+
+    Raises:
+        CliError: ``invalid_request`` when the id breaks those rules or lies inside an
+            existing material; ``destination_exists`` when the folder already exists,
+            even empty.
+    """
+    segments = material_id.split("/")
+    if not all(_SEGMENT.fullmatch(segment) for segment in segments):
+        raise CliError(
+            "invalid_request",
+            f"invalid destination {material_id!r}: use a relative path of folder names made "
+            "of letters, digits, '.', '_', '-', not starting with '.', for example ml/prml",
+        )
+    for depth in range(1, len(segments)):
+        ancestor = "/".join(segments[:depth])
+        if (library_root / ancestor / _METADATA_FILE).exists():
+            raise CliError(
+                "invalid_request",
+                f"invalid destination {material_id}: it is inside material {ancestor}; "
+                "choose a destination outside it",
+            )
+    path = library_root / material_id
+    if path.exists() or path.is_symlink():
+        raise _destination_exists(material_id)
+    return path
+
+
 def create_destination(library_root: Path, material_id: str) -> Path:
     """Create the empty folder for ``material_id``, with any missing parent folders.
 
     Raises:
-        CliError: ``destination_exists`` when the folder already exists, even empty.
+        CliError: as ``check_destination``; ``destination_exists`` also when the folder
+            appears between that check and creation.
     """
-    path = library_root / material_id
+    path = check_destination(library_root, material_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         # Exclusive creation, so a folder appearing after any earlier check is still refused.
         path.mkdir()
     except FileExistsError:
-        raise CliError(
-            "destination_exists", f"{material_id} already exists; choose a new destination"
-        ) from None
+        raise _destination_exists(material_id) from None
     return path
+
+
+def _destination_exists(material_id: str) -> CliError:
+    return CliError("destination_exists", f"{material_id} already exists; choose a new destination")
 
 
 def write_slides(material_dir: Path, markdown: str) -> None:

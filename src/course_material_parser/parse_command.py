@@ -9,7 +9,7 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from course_material_parser import material_store
+from course_material_parser import material_store, pdf
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
 from course_material_parser.docling_conversion import (
     Converted,
@@ -18,8 +18,7 @@ from course_material_parser.docling_conversion import (
 )
 from course_material_parser.markdown_writer import PdfPages, write_markdown
 from course_material_parser.material_store import MaterialRecord, MaterialType, Status
-from course_material_parser.pdf import page_count
-from course_material_parser.settings import Settings, load_settings
+from course_material_parser.settings import Settings, load_settings, require_device_available
 
 _DESCRIPTION = """\
 Convert a source PDF into parsed material stored under library_root.
@@ -57,6 +56,7 @@ def _run(
 ) -> str:
     args = _build_parser().parse_args(argv)
     settings = load_settings(settings_path)
+    require_device_available(settings)
     if converter is None:
         from course_material_parser.docling_conversion import DoclingConverter
 
@@ -85,20 +85,22 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _start(args: argparse.Namespace, settings: Settings, converter: Converter) -> dict:
-    pdf: Path = args.pdf
-    if not pdf.is_file():
-        raise CliError("not_found", f"PDF not found: {pdf}")
-    pages = page_count(pdf)
+    # Every refusal comes before anything is created, so a mistake changes nothing.
+    material_store.check_destination(settings.library_root, args.dest)
+    source: Path = args.pdf
+    if not source.is_file():
+        raise CliError("not_found", f"PDF not found: {source}")
+    pages = pdf.page_count(source)
 
     material_type = MaterialType(args.type)
     destination = material_store.create_destination(settings.library_root, args.dest)
     retained_pdf = material_store.source_pdf(destination)
-    shutil.copyfile(pdf, retained_pdf)
+    shutil.copyfile(source, retained_pdf)
     outcome = converter.convert(retained_pdf, device=settings.device, ocr=False)
 
     def record(status: Status) -> MaterialRecord:
         return MaterialRecord(
-            type=material_type, status=status, source_filename=pdf.name, pages=pages
+            type=material_type, status=status, source_filename=source.name, pages=pages
         )
 
     if not isinstance(outcome, Converted):
