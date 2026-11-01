@@ -21,6 +21,10 @@ read = "course_material_parser.read_command:main"
 requires = ["uv_build>=0.13.3,<0.14.0"]
 build-backend = "uv_build"
 
+[tool.uv.build-backend]
+# Agent Skills keep executable code under scripts/, so the package lives there, not in src/.
+module-root = "scripts"
+
 [dependency-groups]
 dev = [
     "pillow>=13.0.0",
