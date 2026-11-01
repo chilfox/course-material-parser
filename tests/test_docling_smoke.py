@@ -1,8 +1,8 @@
 """Opt-in smoke test that runs real Docling (``pytest -m docling``)."""
 
 import pytest
-from conftest import TEXT_LAYER_PDF
 
+from conftest import TEXT_LAYER_PDF
 from course_material_parser.docling_conversion import Converted, DoclingConverter
 
 pytestmark = pytest.mark.docling

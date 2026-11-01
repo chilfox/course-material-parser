@@ -1,10 +1,10 @@
 """markdown_writer seam: DoclingDocument plus selector in, page-marked Markdown out."""
 
-from doc_builders import blank_document, prov, slide_deck
 from docling_core.types.doc import DocItemLabel, TableCell, TableData
 from docling_core.types.doc.document import ContentLayer
 
 from course_material_parser.markdown_writer import PdfPages, write_markdown
+from doc_builders import blank_document, prov, slide_deck
 
 
 def test_each_source_page_gets_a_page_marker_above_its_content():
