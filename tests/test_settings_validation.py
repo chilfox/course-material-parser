@@ -1,7 +1,7 @@
 """CLI seam: every settings mistake is a ``settings_error`` that says how to fix it."""
 
 import pytest
-from conftest import TEXT_LAYER_PDF
+from conftest import TEXT_LAYER_PDF, assert_error
 
 from course_material_parser import settings as settings_module
 
@@ -17,15 +17,12 @@ def run_any(request, run_parse, run_read):
 
 
 def assert_settings_error(result, *fragments):
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert result.error["error"] == "settings_error"
-    for fragment in fragments:
-        assert fragment in result.error["message"]
+    assert_error(result, "settings_error", *fragments)
 
 
-def write(settings_path, library, body):
-    settings_path.write_text(f'library_root = "{library}"\ndevice = "cpu"\n{body}')
+def write(settings_path, library_root, extra="", *, device="cpu"):
+    """Write a settings file with ``library_root``, ``device``, and any ``extra`` TOML lines."""
+    settings_path.write_text(f'library_root = "{library_root}"\ndevice = "{device}"\n{extra}')
 
 
 def test_a_missing_file_says_to_copy_the_example_and_set_the_required_keys(run_any, settings_path):
@@ -57,7 +54,7 @@ def test_a_library_root_that_does_not_exist_is_rejected_and_not_created(
     run_any, settings_path, tmp_path
 ):
     missing = tmp_path / "no-such-library"
-    settings_path.write_text(f'library_root = "{missing}"\ndevice = "cpu"\n')
+    write(settings_path, missing)
 
     assert_settings_error(run_any(), "library_root", str(missing))
     assert not missing.exists()
@@ -66,7 +63,7 @@ def test_a_library_root_that_does_not_exist_is_rejected_and_not_created(
 def test_a_library_root_that_is_a_file_is_rejected(run_any, settings_path, tmp_path):
     file = tmp_path / "library.txt"
     file.write_text("")
-    settings_path.write_text(f'library_root = "{file}"\ndevice = "cpu"\n')
+    write(settings_path, file)
 
     assert_settings_error(run_any(), "library_root", "directory")
 
@@ -75,7 +72,7 @@ def test_a_tilde_library_root_is_expanded(run_read, settings_path, tmp_path, mon
     home = tmp_path / "home"
     (home / "course-library").mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
-    settings_path.write_text('library_root = "~/course-library"\ndevice = "cpu"\n')
+    write(settings_path, "~/course-library")
 
     result = run_read("list")
 
@@ -94,7 +91,7 @@ def test_parse_start_reports_an_unavailable_device_ahead_of_an_invalid_destinati
     run_parse, settings_path, library, monkeypatch
 ):
     monkeypatch.setattr(settings_module, "device_available", lambda device: device == "cpu")
-    settings_path.write_text(f'library_root = "{library}"\ndevice = "cuda"\n')
+    write(settings_path, library, device="cuda")
 
     result = run_parse("start", "--pdf", "missing.pdf", "--dest", "../x", "--type", "slides")
 
@@ -105,7 +102,7 @@ def test_read_does_not_need_the_device_to_be_available(
     run_read, settings_path, library, monkeypatch
 ):
     monkeypatch.setattr(settings_module, "device_available", lambda device: device == "cpu")
-    settings_path.write_text(f'library_root = "{library}"\ndevice = "cuda"\n')
+    write(settings_path, library, device="cuda")
 
     assert run_read("list").exit_code == 0
 

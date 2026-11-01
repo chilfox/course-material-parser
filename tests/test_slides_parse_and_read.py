@@ -2,7 +2,7 @@
 
 import json
 
-from conftest import TEXT_LAYER_PDF
+from conftest import TEXT_LAYER_PDF, parse_slides
 
 
 def test_parsing_slides_stores_a_ready_material_with_page_marked_markdown(run_parse, library):
@@ -18,11 +18,6 @@ def test_parsing_slides_stores_a_ready_material_with_page_marked_markdown(run_pa
     slides = (material / "contents" / "slides.md").read_text()
     assert slides.index("<page 1>") < slides.index("Slide one body.")
     assert slides.index("<page 2>") < slides.index("Slide two body.")
-
-
-def parse_slides(run_parse, dest="ml/week3-slides"):
-    result = run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", dest, "--type", "slides")
-    assert result.exit_code == 0, result.stderr
 
 
 def test_read_list_shows_parsed_slides_with_source_type_and_page_count(run_parse, run_read):

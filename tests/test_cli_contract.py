@@ -4,14 +4,7 @@ import subprocess
 import sys
 
 import pytest
-from conftest import TEXT_LAYER_PDF
-
-
-def assert_error(result, code):
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert result.error["error"] == code
-    assert result.error["message"]
+from conftest import TEXT_LAYER_PDF, assert_error
 
 
 @pytest.mark.parametrize(
