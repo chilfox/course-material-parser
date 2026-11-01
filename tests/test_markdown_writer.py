@@ -96,17 +96,16 @@ def test_a_spanning_item_is_written_once_under_its_first_page():
     )
 
 
-def test_a_spanning_item_is_included_when_its_provenance_intersects_the_selection():
+def test_a_spanning_item_is_excluded_when_it_only_continues_into_the_selection():
     markdown = write_markdown(_spanning_paragraph_doc(), PdfPages(start=2, end=3))
 
-    assert markdown == (
-        "<page 1>\n\n"
-        "A paragraph across pages.\n\n"
-        "<page 2>\n\n"
-        "Page two text.\n\n"
-        "<page 3>\n\n"
-        "Page three text.\n"
-    )
+    assert markdown == "<page 2>\n\nPage two text.\n\n<page 3>\n\nPage three text.\n"
+
+
+def test_a_spanning_item_is_included_whole_when_it_starts_inside_and_runs_past_the_end():
+    markdown = write_markdown(_spanning_paragraph_doc(), PdfPages(start=1, end=1))
+
+    assert markdown == "<page 1>\n\nPage one text.\n\nA paragraph across pages.\n"
 
 
 def test_formulas_and_tables_are_written_in_place_under_their_page():
