@@ -4,6 +4,7 @@ import subprocess
 import sys
 
 import pytest
+
 from conftest import TEXT_LAYER_PDF, assert_error
 
 

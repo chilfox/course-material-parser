@@ -1,8 +1,8 @@
 """CLI seam: every settings mistake is a ``settings_error`` that says how to fix it."""
 
 import pytest
-from conftest import TEXT_LAYER_PDF, assert_error
 
+from conftest import TEXT_LAYER_PDF, assert_error
 from course_material_parser import settings as settings_module
 
 
