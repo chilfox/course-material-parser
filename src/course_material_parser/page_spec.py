@@ -25,7 +25,7 @@ def parse_pages(spec: str, *, material_id: str, page_count: int) -> list[int]:
         CliError: ``invalid_request`` when ``spec`` is malformed, a range is reversed,
             or a page lies outside ``1..page_count``.
     """
-    pages: list[int] = []
+    ranges: list[tuple[int, int]] = []
     for part in spec.split(","):
         match = _PART.fullmatch(part.strip())
         if match is None:
@@ -39,10 +39,12 @@ def parse_pages(spec: str, *, material_id: str, page_count: int) -> list[int]:
             raise CliError(
                 "invalid_request", f"malformed --pages '{spec}': range {start}-{end} is reversed"
             )
-        pages.extend(range(start, end + 1))
-    if any(page < 1 or page > page_count for page in pages):
+        ranges.append((start, end))
+    # Bounds are checked before expanding, so a range like 1-999999999 is refused at once
+    # instead of first building a list of a billion pages.
+    if any(start < 1 or end > page_count for start, end in ranges):
         raise CliError(
             "invalid_request",
             f"pages out of range: {material_id} has pages 1-{page_count}",
         )
-    return pages
+    return [page for start, end in ranges for page in range(start, end + 1)]
