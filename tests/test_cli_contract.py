@@ -82,14 +82,15 @@ def test_top_level_help_explains_material_ids_and_source_pages(request, run):
     assert "source-PDF pages counted from 1" in result.stdout
 
 
-def test_the_reader_never_imports_docling(run_parse, settings_path):
+def test_the_reader_never_imports_docling_or_torch(run_parse, settings_path):
     run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", "deck", "--type", "slides")
     script = (
         "import sys\n"
         "from pathlib import Path\n"
         "from course_material_parser import read_command\n"
         "read_command.main(['get', '--source', 'deck'], settings_path=Path(sys.argv[1]))\n"
-        "loaded = [m for m in sys.modules if m.split('.')[0] in {'docling', 'docling_core'}]\n"
+        "heavy = {'docling', 'docling_core', 'torch'}\n"
+        "loaded = [m for m in sys.modules if m.split('.')[0] in heavy]\n"
         "assert not loaded, sorted(loaded)\n"
     )
 
