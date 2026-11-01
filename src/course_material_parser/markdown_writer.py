@@ -5,7 +5,7 @@ The ``<page N>`` marker syntax and block layout belong to ``page_blocks``, which
 reader shares. Adding a finer-grained selector stays local to this module and its selector
 type. Text, formulas (LaTeX math), and tables (Markdown tables) are delegated to
 docling-core's public Markdown serializer; content Docling did not recognize passes
-through as emitted. Pictures use an own serializer.
+through as emitted. Pictures are written by this module's own serializer as visuals.
 """
 
 from collections.abc import Iterator
@@ -56,14 +56,17 @@ def write_markdown(doc: DoclingDocument, selector: Selector) -> str:
         if node.content_layer is not ContentLayer.BODY:
             continue
         pages = _pages(doc, node)
-        if not pages or min(pages) not in selected:
+        if not pages:
+            continue
+        first_page = min(pages)
+        if first_page not in selected:
             continue
         text = serializer.serialize(item=node).text
         if text:
             # Selecting by first page keeps every marker inside the approved pages and
             # writes each spanning item once, whole, so adjacent selections never
             # repeat or cut an item and a marker always means "content starts here".
-            blocks_by_page[min(pages)].append(text)
+            blocks_by_page[first_page].append(text)
 
     return join_page_blocks(
         [page_block(page, blocks_by_page[page]) for page in sorted(blocks_by_page)]

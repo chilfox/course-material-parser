@@ -58,9 +58,12 @@ def _max_chars(value: Any) -> int:
     return value
 
 
-def _validated_by(validate: Callable[[Any], Any], **default: Any) -> Any:
-    """Declare a ``Settings`` field whose raw TOML value ``validate`` checks and converts."""
-    return field(metadata={_VALIDATE: validate}, **default)
+def _validated_by(validate: Callable[[Any], Any], default: Any = MISSING) -> Any:
+    """Declare a ``Settings`` field whose raw TOML value ``validate`` checks and converts.
+
+    Without ``default`` the key is required.
+    """
+    return field(default=default, metadata={_VALIDATE: validate})
 
 
 @dataclass(frozen=True)
@@ -73,8 +76,8 @@ class Settings:
 
     library_root: Path = _validated_by(_library_root)
     device: Device = _validated_by(_device)
-    allow_ocr: bool = _validated_by(_allow_ocr, default=True)
-    combined_read_max_chars: int = _validated_by(_max_chars, default=60000)
+    allow_ocr: bool = _validated_by(_allow_ocr, True)
+    combined_read_max_chars: int = _validated_by(_max_chars, 60000)
 
 
 _FIELDS = {settings_field.name: settings_field for settings_field in fields(Settings)}
