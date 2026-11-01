@@ -83,6 +83,22 @@ def converter() -> FakeConverter:
     )
 
 
+def assert_error(result: CliResult, code: str, *fragments: str) -> None:
+    """Assert ``result`` failed with the error ``code`` and a message holding ``fragments``."""
+    assert result.exit_code == 1
+    assert result.stdout == ""
+    assert result.error["error"] == code
+    assert result.error["message"]
+    for fragment in fragments:
+        assert fragment in result.error["message"]
+
+
+def parse_slides(run_parse, dest: str = "ml/week3-slides") -> None:
+    """Parse the text-layer fixture as slides into ``dest`` and assert it succeeded."""
+    result = run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", dest, "--type", "slides")
+    assert result.exit_code == 0, result.stderr
+
+
 def _runner(capsys, main):
     def run(*argv: str) -> CliResult:
         exit_code = main(list(argv))

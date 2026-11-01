@@ -3,7 +3,7 @@
 import json
 
 import pytest
-from conftest import TEXT_LAYER_PDF
+from conftest import TEXT_LAYER_PDF, assert_error
 
 from course_material_parser import pdf
 
@@ -20,20 +20,13 @@ def snapshot(root):
     }
 
 
-def assert_refused(result, code):
-    assert result.exit_code == 1
-    assert result.stdout == ""
-    assert result.error["error"] == code
-    assert result.error["message"]
-
-
 def test_an_existing_empty_destination_is_refused_and_left_untouched(run_parse, library):
     (library / "ml" / "prml").mkdir(parents=True)
     before = snapshot(library)
 
     result = start(run_parse, "ml/prml")
 
-    assert_refused(result, "destination_exists")
+    assert_error(result, "destination_exists")
     assert "ml/prml" in result.error["message"]
     assert snapshot(library) == before
 
@@ -44,7 +37,7 @@ def test_an_existing_material_is_refused_and_left_untouched(run_parse, library):
 
     result = start(run_parse, "ml/deck")
 
-    assert_refused(result, "destination_exists")
+    assert_error(result, "destination_exists")
     assert snapshot(library) == before
 
 
@@ -65,7 +58,7 @@ def test_a_destination_appearing_after_the_preliminary_check_is_refused(
 
     result = start(run_parse, "ml/deck")
 
-    assert_refused(result, "destination_exists")
+    assert_error(result, "destination_exists")
     assert snapshot(library / "ml" / "deck") == {"theirs.txt": b"keep me"}
 
 
@@ -92,7 +85,7 @@ def test_escaping_or_invalid_destinations_are_refused_before_anything_is_created
 ):
     result = start(run_parse, dest)
 
-    assert_refused(result, "invalid_request")
+    assert_error(result, "invalid_request")
     assert "destination" in result.error["message"]
     assert snapshot(library) == {}
 
@@ -108,7 +101,7 @@ def test_a_destination_through_a_symlink_leaving_the_library_is_refused(
 
     result = start(run_parse, dest)
 
-    assert_refused(result, "invalid_request")
+    assert_error(result, "invalid_request")
     assert "outside library_root" in result.error["message"]
     assert snapshot(library) == before
     assert list(elsewhere.iterdir()) == []
@@ -120,7 +113,7 @@ def test_a_destination_nested_inside_a_material_is_refused(run_parse, library):
 
     result = start(run_parse, "ml/deck/contents/more")
 
-    assert_refused(result, "invalid_request")
+    assert_error(result, "invalid_request")
     assert "inside material ml/deck" in result.error["message"]
     assert snapshot(library) == before
 
@@ -137,7 +130,7 @@ def test_a_destination_nested_inside_an_interrupted_parse_is_refused(run_parse, 
 
     result = start(run_parse, "ml/deck/more")
 
-    assert_refused(result, "invalid_request")
+    assert_error(result, "invalid_request")
     assert "ml/deck" in result.error["message"]
     assert "interrupted parse" in result.error["message"]
     assert "delete" in result.error["message"]
@@ -152,7 +145,7 @@ def test_a_destination_under_an_existing_file_is_refused_before_anything_is_crea
 
     result = start(run_parse, "ml/prml")
 
-    assert_refused(result, "invalid_request")
+    assert_error(result, "invalid_request")
     assert "ml exists and is not a folder" in result.error["message"]
     assert snapshot(library) == before
 
@@ -162,7 +155,7 @@ def test_refusals_happen_before_the_pdf_is_even_read(run_parse, library):
 
     result = run_parse("start", "--pdf", "missing.pdf", "--dest", "deck", "--type", "slides")
 
-    assert_refused(result, "destination_exists")
+    assert_error(result, "destination_exists")
 
 
 def test_missing_parent_folders_of_the_destination_are_created(run_parse, library):
