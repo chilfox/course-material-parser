@@ -4,12 +4,11 @@ Renders are named ``page_<N>.png`` and kept until the user cleans them up. The r
 layout (where the folder lives inside the material) is private to this module.
 """
 
-import os
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from course_material_parser import material_store, pdf
+from course_material_parser.atomic_write import write_atomically
 from course_material_parser.cli_output import CliError
 from course_material_parser.material_store import Material
 
@@ -53,7 +52,9 @@ def render(material: Material, pages: list[int]) -> Renders:
         source = material_store.source_pdf(material.path)
         try:
             for page, png in pdf.render_pngs(source, missing):
-                _write_atomically(render_dir / _file(page), png)
+                # Overlapping sessions may render the same page at once; each replaces
+                # the file whole, so no reader sees a half-written PNG and no lock is needed.
+                write_atomically(render_dir / _file(page), png)
         except pdf.RenderFailed as error:
             raise CliError(
                 "render_failed",
@@ -81,16 +82,3 @@ def clean(material: Material) -> Removed:
 
 def _file(page: int | str) -> str:
     return f"page_{page}.png"
-
-
-def _write_atomically(path: Path, data: bytes) -> None:
-    """Write ``data`` to ``path`` through a temporary file and a rename.
-
-    Overlapping sessions may render the same page at once. The rename makes each of them
-    replace the file whole, so no reader ever sees a half-written PNG, and no lock is needed.
-    """
-    with tempfile.NamedTemporaryFile(
-        dir=path.parent, prefix=f".{path.stem}-", suffix=".tmp", delete=False
-    ) as handle:
-        handle.write(data)
-    os.replace(handle.name, path)

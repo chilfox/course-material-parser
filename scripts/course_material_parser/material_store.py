@@ -8,11 +8,11 @@ this one for paths instead of building them, so the layout lives in one place.
 import json
 import os
 import re
-import tempfile
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from course_material_parser.atomic_write import write_atomically
 from course_material_parser.cli_output import CliError
 
 FORMAT_VERSION = 1
@@ -175,11 +175,7 @@ def write_slides(material_dir: Path, markdown: str) -> None:
 def write_record(material_dir: Path, record: MaterialRecord) -> None:
     """Write ``material.json`` atomically, so readers never see a partial file."""
     payload = json.dumps(asdict(record), indent=2) + "\n"
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=material_dir, prefix=".material-", delete=False
-    ) as handle:
-        handle.write(payload)
-    os.replace(handle.name, material_dir / _METADATA_FILE)
+    write_atomically(material_dir / _METADATA_FILE, payload.encode("utf-8"))
 
 
 def ready_materials(library_root: Path, prefix: str | None = None) -> list[Material]:
