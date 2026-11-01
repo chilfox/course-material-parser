@@ -51,6 +51,9 @@ def test_an_existing_material_is_refused_and_left_untouched(run_parse, library):
 def test_a_destination_appearing_after_the_preliminary_check_is_refused(
     run_parse, library, converter, monkeypatch
 ):
+    # parse runs pdf.page_count after its preliminary destination check and before it
+    # creates the destination, so this hook is the gap where another process can win the
+    # race. If that order changes, this test must hook another step in the same gap.
     real_page_count = pdf.page_count
 
     def page_count_while_another_process_creates_the_destination(path):
