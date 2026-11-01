@@ -43,9 +43,10 @@ def write_markdown(doc: DoclingDocument, selector: Selector) -> str:
     """Return the selected content of ``doc`` as Markdown with ``<page N>`` markers.
 
     Every page in the selection gets a marker, even when it has no content. A top-level
-    body item is selected when any of its source pages falls in the selection, and is
-    written whole under the first of its source pages, which can lie before the
-    selection. Furniture (running headers and footers) is never written.
+    body item is selected when its first source page falls in the selection, and is
+    written whole under that page, even when it runs past the selection end. An item
+    that starts before the selection and only continues into it is left out. Furniture
+    (running headers and footers) is never written.
     """
     serializer = MarkdownDocSerializer(doc=doc, picture_serializer=_VisualSerializer())
     selected = range(selector.start, selector.end + 1)
@@ -55,13 +56,14 @@ def write_markdown(doc: DoclingDocument, selector: Selector) -> str:
         if node.content_layer is not ContentLayer.BODY:
             continue
         pages = _pages(doc, node)
-        if not any(page in selected for page in pages):
+        if not pages or min(pages) not in selected:
             continue
         text = serializer.serialize(item=node).text
         if text:
-            # A spanning item stays whole and under its first page, so a marker always
-            # means "content below starts on this page" and is never cut mid-item.
-            blocks_by_page.setdefault(min(pages), []).append(text)
+            # Selecting by first page keeps every marker inside the approved pages and
+            # writes each spanning item once, whole, so adjacent selections never
+            # repeat or cut an item and a marker always means "content starts here".
+            blocks_by_page[min(pages)].append(text)
 
     return join_page_blocks(
         [page_block(page, blocks_by_page[page]) for page in sorted(blocks_by_page)]
