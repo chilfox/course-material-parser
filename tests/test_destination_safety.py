@@ -105,6 +105,19 @@ def test_a_destination_nested_inside_a_material_is_refused(run_parse, library):
     assert snapshot(library) == before
 
 
+def test_a_destination_under_an_existing_file_is_refused_before_anything_is_created(
+    run_parse, library
+):
+    (library / "ml").write_text("not a folder")
+    before = snapshot(library)
+
+    result = start(run_parse, "ml/prml")
+
+    assert_refused(result, "invalid_request")
+    assert "ml exists and is not a folder" in result.error["message"]
+    assert snapshot(library) == before
+
+
 def test_refusals_happen_before_the_pdf_is_even_read(run_parse, library):
     (library / "deck").mkdir()
 
