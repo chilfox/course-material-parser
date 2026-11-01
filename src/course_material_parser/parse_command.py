@@ -56,11 +56,6 @@ def _run(
 ) -> str:
     args = _build_parser().parse_args(argv)
     settings = load_settings(settings_path)
-    require_device_available(settings)
-    if converter is None:
-        from course_material_parser.docling_conversion import DoclingConverter
-
-        converter = DoclingConverter()
     return json_line(_start(args, settings, converter))
 
 
@@ -84,7 +79,14 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _start(args: argparse.Namespace, settings: Settings, converter: Converter) -> dict:
+def _start(args: argparse.Namespace, settings: Settings, converter: Converter | None) -> dict:
+    # Only start converts, so only it checks the device: that imports torch, which the
+    # other subcommands never need.
+    require_device_available(settings)
+    if converter is None:
+        from course_material_parser.docling_conversion import DoclingConverter
+
+        converter = DoclingConverter()
     # Every refusal comes before anything is created, so a mistake changes nothing.
     material_store.check_destination(settings.library_root, args.dest)
     source: Path = args.pdf
