@@ -108,6 +108,25 @@ def test_a_destination_nested_inside_a_material_is_refused(run_parse, library):
     assert snapshot(library) == before
 
 
+@pytest.mark.parametrize("leftover", ["source.pdf", "contents"])
+def test_a_destination_nested_inside_an_interrupted_parse_is_refused(run_parse, library, leftover):
+    interrupted = library / "ml" / "deck"
+    interrupted.mkdir(parents=True)
+    if leftover == "contents":
+        (interrupted / leftover).mkdir()
+    else:
+        (interrupted / leftover).write_bytes(TEXT_LAYER_PDF.read_bytes())
+    before = snapshot(library)
+
+    result = start(run_parse, "ml/deck/more")
+
+    assert_refused(result, "invalid_request")
+    assert "ml/deck" in result.error["message"]
+    assert "interrupted parse" in result.error["message"]
+    assert "delete" in result.error["message"]
+    assert snapshot(library) == before
+
+
 def test_a_destination_under_an_existing_file_is_refused_before_anything_is_created(
     run_parse, library
 ):

@@ -77,8 +77,8 @@ def check_destination(library_root: Path, material_id: str) -> Path:
 
     Raises:
         CliError: ``invalid_request`` when the id breaks those rules or lies inside an
-            existing material or under an existing file; ``destination_exists`` when the
-            folder already exists, even empty.
+            existing material or interrupted parse, or under an existing file;
+            ``destination_exists`` when the folder already exists, even empty.
     """
     segments = material_id.split("/")
     if not all(_SEGMENT.fullmatch(segment) for segment in segments):
@@ -102,6 +102,15 @@ def check_destination(library_root: Path, material_id: str) -> Path:
                 "invalid_request",
                 f"invalid destination {material_id}: it is inside material {ancestor}; "
                 "choose a destination outside it",
+            )
+        # A crash between creating the folder and copying the PDF leaves it empty, which
+        # looks like any other parent folder, so that interrupted parse can't be detected.
+        if (ancestor_path / _SOURCE_PDF).exists() or (ancestor_path / _CONTENTS_DIR).exists():
+            raise CliError(
+                "invalid_request",
+                f"invalid destination {material_id}: it is inside {ancestor}, which looks "
+                "like an interrupted parse; delete that folder by hand or choose a "
+                "destination outside it",
             )
     path = library_root / material_id
     if path.exists() or path.is_symlink():
