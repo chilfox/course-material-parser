@@ -97,6 +97,23 @@ def test_escaping_or_invalid_destinations_are_refused_before_anything_is_created
     assert snapshot(library) == {}
 
 
+@pytest.mark.parametrize("dest", ["ml/deck", "ml/week3/deck"])
+def test_a_destination_through_a_symlink_leaving_the_library_is_refused(
+    run_parse, library, tmp_path, dest
+):
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (library / "ml").symlink_to(elsewhere, target_is_directory=True)
+    before = snapshot(library)
+
+    result = start(run_parse, dest)
+
+    assert_refused(result, "invalid_request")
+    assert "outside library_root" in result.error["message"]
+    assert snapshot(library) == before
+    assert list(elsewhere.iterdir()) == []
+
+
 def test_a_destination_nested_inside_a_material_is_refused(run_parse, library):
     assert start(run_parse, "ml/deck").exit_code == 0
     before = snapshot(library)
