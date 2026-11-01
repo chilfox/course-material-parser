@@ -12,12 +12,14 @@ from pathlib import Path
 from course_material_parser import material_store, pdf
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
 from course_material_parser.docling_conversion import (
-    Converted,
+    ConversionFailed,
+    ConversionOutcome,
     Converter,
     PartiallyConverted,
 )
 from course_material_parser.markdown_writer import PdfPages, write_markdown
 from course_material_parser.material_store import MaterialRecord, MaterialType, Status
+from course_material_parser.provenance import missing_provenance
 from course_material_parser.settings import Settings, load_settings, require_device_available
 
 _DESCRIPTION = """\
@@ -105,16 +107,9 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
             type=material_type, status=status, source_filename=source.name, pages=pages
         )
 
-    if not isinstance(outcome, Converted):
-        material_store.write_record(destination, record(Status.FAILED))
-        outcome_wording = (
-            "partially converted" if isinstance(outcome, PartiallyConverted) else "failed"
-        )
-        raise CliError(
-            "conversion_failed",
-            f"conversion {outcome_wording}: {outcome.message}; {args.dest} is marked failed, "
-            "retry with a new destination",
-        )
+    problem = _conversion_problem(outcome)
+    if problem is not None:
+        raise _fail(destination, record(Status.FAILED), args.dest, problem)
 
     material_store.write_slides(
         destination, write_markdown(outcome.document, PdfPages(start=1, end=pages))
@@ -122,3 +117,29 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
     # Written last, so a material is only ever visible as ready once all its contents exist.
     material_store.write_record(destination, record(Status.READY))
     return {"source": args.dest, "type": material_type, "status": Status.READY, "pages": pages}
+
+
+def _conversion_problem(outcome: ConversionOutcome) -> str | None:
+    """Return why ``outcome`` can't be published, or ``None`` when it can.
+
+    A partial conversion is never published, and neither is a document with a body item
+    that has no source page, because that item would be dropped or misplaced.
+    """
+    if isinstance(outcome, PartiallyConverted):
+        return f"partial conversion: {outcome.message}"
+    if isinstance(outcome, ConversionFailed):
+        return f"conversion failed: {outcome.message}"
+    return missing_provenance(outcome.document)
+
+
+def _fail(destination: Path, record: MaterialRecord, material_id: str, problem: str) -> CliError:
+    """Mark the material at ``destination`` failed and return the ``conversion_failed`` error.
+
+    Shared by every material type. What already exists in the folder is kept for
+    inspection; ``record`` must have status ``failed``.
+    """
+    material_store.write_record(destination, record)
+    return CliError(
+        "conversion_failed",
+        f"{problem}; {material_id} is marked failed, retry with a new destination",
+    )
