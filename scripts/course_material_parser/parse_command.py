@@ -34,7 +34,13 @@ See `parse <command> --help` for details."""
 _START_DESCRIPTION = """\
 Parse the source PDF into a new material at MATERIAL. The destination must not exist;
 missing parent folders are created. Slides become one Markdown deck with a marker per
-source page and are ready to read when this command succeeds."""
+source page and are ready to read when this command succeeds.
+
+OCR: without --ocr or --no-ocr, the PDF's text layer is checked first, and the parse is
+refused with ocr_required, reporting the count, when more than half the pages have no
+text layer. Then decide: --ocr to convert with OCR (refused with ocr_disabled when
+allow_ocr = false in settings.toml), or --no-ocr when only page renders matter, which
+skips the check."""
 
 
 def main(
@@ -76,7 +82,56 @@ def _build_parser() -> argparse.ArgumentParser:
     start.add_argument(
         "--type", required=True, choices=[t.value for t in MaterialType], help="kind of source PDF"
     )
+    ocr = start.add_mutually_exclusive_group()
+    ocr.add_argument(
+        "--ocr",
+        dest="ocr",
+        action="store_const",
+        const=True,
+        help="convert with OCR; refused when allow_ocr = false in settings.toml",
+    )
+    ocr.add_argument(
+        "--no-ocr",
+        dest="ocr",
+        action="store_const",
+        const=False,
+        help="convert without OCR and skip the text-layer check",
+    )
     return parser
+
+
+def _check_ocr_choice(source: Path, ocr: bool | None, settings: Settings) -> None:
+    """Refuse an OCR choice the PDF or the user's permission rules out.
+
+    ``ocr`` is ``True`` for ``--ocr``, ``False`` for ``--no-ocr``, and ``None`` without a
+    flag, which runs the text-layer pre-check.
+
+    Raises:
+        CliError: ``ocr_disabled`` for ``--ocr`` when ``allow_ocr = false``;
+            ``ocr_required`` without a flag when the PDF looks scanned.
+    """
+    if ocr is True and not settings.allow_ocr:
+        raise CliError(
+            "ocr_disabled",
+            "--ocr is not allowed: OCR is disabled in settings.toml (allow_ocr = false); "
+            "tell the user",
+        )
+    if ocr is not None:
+        return
+    layer = pdf.text_layer(source)
+    if not layer.looks_scanned:
+        return
+    message = (
+        f"{layer.pages_without_text} of {layer.pages} pages have no text layer; this looks scanned"
+    )
+    if settings.allow_ocr:
+        message += "; re-run with --ocr, or --no-ocr if only page renders matter"
+    else:
+        message += (
+            "; OCR is disabled in settings.toml (allow_ocr = false), so tell the user, "
+            "or re-run with --no-ocr if only page renders matter"
+        )
+    raise CliError("ocr_required", message)
 
 
 def _start(args: argparse.Namespace, settings: Settings, converter: Converter | None) -> dict:
@@ -93,12 +148,13 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
     if not source.is_file():
         raise CliError("not_found", f"PDF not found: {source}")
     pages = pdf.page_count(source)
+    _check_ocr_choice(source, args.ocr, settings)
 
     material_type = MaterialType(args.type)
     destination = material_store.create_destination(settings.library_root, args.dest)
     retained_pdf = material_store.source_pdf(destination)
     shutil.copyfile(source, retained_pdf)
-    outcome = converter.convert(retained_pdf, device=settings.device, ocr=False)
+    outcome = converter.convert(retained_pdf, device=settings.device, ocr=bool(args.ocr))
 
     def record(status: Status) -> MaterialRecord:
         return MaterialRecord(
