@@ -84,38 +84,58 @@ def check_destination(library_root: Path, material_id: str) -> Path:
     if not all(_SEGMENT.fullmatch(segment) for segment in segments):
         raise CliError(
             "invalid_request",
-            f"invalid destination {material_id!r}: use a relative path of folder names made "
+            f"invalid destination '{material_id}': use a relative path of folder names made "
             "of letters, digits, '.', '_', '-', not starting with '.', for example ml/prml",
         )
+    _refuse_links_leaving(library_root, material_id)
     for depth in range(1, len(segments)):
         ancestor = "/".join(segments[:depth])
         ancestor_path = library_root / ancestor
         # A file (or dangling link) here would make creating the folders fail part way.
         if (ancestor_path.exists() or ancestor_path.is_symlink()) and not ancestor_path.is_dir():
-            raise CliError(
-                "invalid_request",
-                f"invalid destination {material_id}: {ancestor} exists and is not a folder; "
-                "choose a destination outside it",
-            )
+            raise _invalid_destination(material_id, f"{ancestor} exists and is not a folder")
         if (ancestor_path / _METADATA_FILE).exists():
-            raise CliError(
-                "invalid_request",
-                f"invalid destination {material_id}: it is inside material {ancestor}; "
-                "choose a destination outside it",
-            )
+            raise _invalid_destination(material_id, f"it is inside material {ancestor}")
         # A crash between creating the folder and copying the PDF leaves it empty, which
         # looks like any other parent folder, so that interrupted parse can't be detected.
         if (ancestor_path / _SOURCE_PDF).exists() or (ancestor_path / _CONTENTS_DIR).exists():
-            raise CliError(
-                "invalid_request",
-                f"invalid destination {material_id}: it is inside {ancestor}, which looks "
-                "like an interrupted parse; delete that folder by hand or choose a "
-                "destination outside it",
+            raise _invalid_destination(
+                material_id,
+                f"it is inside {ancestor}, which looks like an interrupted parse",
+                alternative="delete that folder by hand",
             )
     path = library_root / material_id
     if path.exists() or path.is_symlink():
         raise _destination_exists(material_id)
     return path
+
+
+def _refuse_links_leaving(library_root: Path, material_id: str) -> None:
+    """Refuse ``material_id`` when an existing folder link on its path leaves the library.
+
+    The segment rules keep the id itself inside ``library_root``, but an existing
+    symlinked folder could still redirect the destination elsewhere, so the deepest
+    existing ancestor (or the destination itself) must resolve under the resolved root.
+    """
+    root = library_root.resolve()
+    existing = library_root / material_id
+    while not existing.exists() and existing != library_root:
+        existing = existing.parent
+    resolved = existing.resolve()
+    if not resolved.is_relative_to(root):
+        ancestor = existing.relative_to(library_root).as_posix()
+        raise _invalid_destination(
+            material_id, f"{ancestor} leads to {resolved}, outside library_root"
+        )
+
+
+def _invalid_destination(material_id: str, reason: str, *, alternative: str = "") -> CliError:
+    """Return the ``invalid_request`` for a destination refused because of where it lies."""
+    fix = f"{alternative} or choose" if alternative else "choose"
+    return CliError(
+        "invalid_request",
+        f"invalid destination '{material_id}': {reason}; {fix} a destination outside it",
+    )
 
 
 def create_destination(library_root: Path, material_id: str) -> Path:
