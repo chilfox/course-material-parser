@@ -6,9 +6,11 @@ This module must never import Docling, so reader startup stays fast.
 import argparse
 from collections.abc import Sequence
 from pathlib import Path
+from typing import assert_never
 
 from course_material_parser import material_store
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
+from course_material_parser.material_store import Material, MaterialType
 from course_material_parser.page_blocks import join_page_blocks, split_page_blocks
 from course_material_parser.page_spec import PAGES_HELP, parse_pages
 from course_material_parser.settings import Settings, load_settings
@@ -107,20 +109,38 @@ def _list(settings: Settings) -> dict:
 
 def _toc(settings: Settings, source: str) -> dict:
     material = material_store.get_ready_material(settings.library_root, source)
-    return {"source": source, "type": material.record.type, "pages": material.record.pages}
+    match material.record.type:
+        # Textbook tocs (chapters and units) add their case here.
+        case MaterialType.SLIDES:
+            return {"source": source, "type": material.record.type, "pages": material.record.pages}
+        case unhandled:
+            assert_never(unhandled)
 
 
 def _get(settings: Settings, source: str, unit_id: str | None, pages: str | None) -> str:
     if unit_id is not None and pages is not None:
         raise CliError("invalid_request", "use either --id or --pages, not both")
     material = material_store.get_ready_material(settings.library_root, source)
+    match material.record.type:
+        # Textbook reads (--id, size limit, --confirm) add their case here.
+        case MaterialType.SLIDES:
+            # --confirm is accepted and ignored: slide reads are never size-checked.
+            return _get_slides(material, unit_id, pages)
+        case unhandled:
+            assert_never(unhandled)
+
+
+def _get_slides(material: Material, unit_id: str | None, pages: str | None) -> str:
     if unit_id is not None:
         raise CliError(
-            "invalid_request", f"--id applies only to textbooks; {source} is slides, use --pages"
+            "invalid_request",
+            f"--id applies only to textbooks; {material.material_id} is slides, use --pages",
         )
     deck = material_store.slides_markdown(material.path).read_text(encoding="utf-8")
     if pages is None:
         return deck
-    selected = parse_pages(pages, material_id=source, page_count=material.record.pages)
+    selected = parse_pages(
+        pages, material_id=material.material_id, page_count=material.record.pages
+    )
     blocks = split_page_blocks(deck)
     return join_page_blocks([blocks[page] for page in selected])
