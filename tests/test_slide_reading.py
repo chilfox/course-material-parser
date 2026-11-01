@@ -1,6 +1,7 @@
 """CLI seam: agents cut slide pages, look up a deck's toc, and get selector errors."""
 
 import pytest
+
 from conftest import assert_error, parse_slides
 from doc_builders import slide_deck
 
