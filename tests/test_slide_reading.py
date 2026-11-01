@@ -1,5 +1,7 @@
 """CLI seam: agents cut slide pages, look up a deck's toc, and get selector errors."""
 
+import time
+
 import pytest
 from doc_builders import slide_deck
 from test_cli_contract import assert_error
@@ -65,6 +67,17 @@ def test_slide_pages_out_of_range_name_the_valid_range(run_parse, run_read, page
 
     result = run_read("get", "--source", "ml/week3-slides", "--pages", pages)
 
+    assert_error(result, "invalid_request")
+    assert result.error["message"] == "pages out of range: ml/week3-slides has pages 1-2"
+
+
+def test_a_huge_out_of_range_page_range_is_refused_without_expanding_it(run_parse, run_read):
+    parse_slides(run_parse)
+    started = time.perf_counter()
+
+    result = run_read("get", "--source", "ml/week3-slides", "--pages", "1-999999999")
+
+    assert time.perf_counter() - started < 1
     assert_error(result, "invalid_request")
     assert result.error["message"] == "pages out of range: ml/week3-slides has pages 1-2"
 
