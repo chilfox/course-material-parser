@@ -1,10 +1,11 @@
 """Write ``<page N>``-marked Markdown from a DoclingDocument.
 
-This module owns every Markdown rule of parsed material, so that changing marker syntax
-or adding a finer-grained selector stays local to it and its selector type. Text,
-formulas (LaTeX math), and tables (Markdown tables) are delegated to docling-core's public
-Markdown serializer; content Docling did not recognize passes through as emitted.
-Pictures use an own serializer.
+This module decides which content of a document is written, and under which source page.
+The ``<page N>`` marker syntax and block layout belong to ``page_blocks``, which the
+reader shares. Adding a finer-grained selector stays local to this module and its selector
+type. Text, formulas (LaTeX math), and tables (Markdown tables) are delegated to
+docling-core's public Markdown serializer; content Docling did not recognize passes
+through as emitted. Pictures use an own serializer.
 """
 
 from collections.abc import Iterator
@@ -19,6 +20,8 @@ from docling_core.transforms.serializer.base import (
 from docling_core.transforms.serializer.common import create_ser_result
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
 from docling_core.types.doc import ContentLayer, DocItem, DoclingDocument, NodeItem, PictureItem
+
+from course_material_parser.page_blocks import join_page_blocks, page_block
 
 _VISUAL_MARKER = "<visual>"
 
@@ -60,10 +63,9 @@ def write_markdown(doc: DoclingDocument, selector: Selector) -> str:
             # means "content below starts on this page" and is never cut mid-item.
             blocks_by_page.setdefault(min(pages), []).append(text)
 
-    sections = [
-        "\n\n".join([f"<page {page}>", *blocks_by_page[page]]) for page in sorted(blocks_by_page)
-    ]
-    return "\n\n".join(sections) + "\n"
+    return join_page_blocks(
+        [page_block(page, blocks_by_page[page]) for page in sorted(blocks_by_page)]
+    )
 
 
 def _pages(doc: DoclingDocument, node: NodeItem) -> set[int]:
