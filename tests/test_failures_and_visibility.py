@@ -3,9 +3,10 @@
 import json
 
 import pytest
+from docling_core.types.doc import DocItemLabel
+
 from conftest import TEXT_LAYER_PDF, assert_error, parse_slides
 from doc_builders import prov, slide_deck
-from docling_core.types.doc import DocItemLabel
 
 
 def _start(run_parse, dest: str = "ml/deck"):

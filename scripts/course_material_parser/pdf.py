@@ -2,6 +2,7 @@
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 import pypdfium2
@@ -37,3 +38,36 @@ def page_count(pdf: Path) -> int:
     """
     with opened(pdf) as document:
         return len(document)
+
+
+@dataclass(frozen=True)
+class TextLayer:
+    """How much of a source PDF carries a text layer, from ``text_layer``."""
+
+    pages: int
+    pages_without_text: int
+
+    @property
+    def looks_scanned(self) -> bool:
+        """Whether more than half the pages have no text layer, the fixed OCR threshold."""
+        return self.pages_without_text * 2 > self.pages
+
+
+def text_layer(pdf: Path) -> TextLayer:
+    """Count the pages of ``pdf`` whose text layer holds no characters.
+
+    This is the pre-check that decides whether a PDF looks scanned and needs OCR. It only
+    asks pdfium for each page's character count, without extracting text or rendering.
+
+    Raises:
+        CliError: ``invalid_request`` when the file can't be opened as a PDF.
+    """
+    with opened(pdf) as document:
+        without_text = 0
+        for page in document:
+            textpage = page.get_textpage()
+            if textpage.count_chars() == 0:
+                without_text += 1
+            textpage.close()
+            page.close()
+        return TextLayer(pages=len(document), pages_without_text=without_text)
