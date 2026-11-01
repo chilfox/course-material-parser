@@ -20,6 +20,14 @@ A proposed organization of a textbook's content into chapters and sections for s
 **Reading unit**:
 A separately readable portion of a textbook, normally a main numbered section or a named portion such as a chapter introduction or references.
 
+**Interrupted parse**:
+A material folder left without `material.json` because a parse stopped part way. Readers ignore it, and a new destination may not be nested inside it.
+_Avoid_: partial material, broken material
+
+**Visual**:
+A picture in parsed material, written as a `<visual>` marker followed by its detected caption, if any. Its content is understood by rendering the source page it sits under.
+_Avoid_: figure, image placeholder
+
 **Material id**:
 The identity of one parsed material: its destination path relative to the library root.
 
