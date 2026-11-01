@@ -22,3 +22,11 @@ def slide_deck(pages: dict[int, list[str]], page_count: int) -> DoclingDocument:
         for paragraph in paragraphs:
             doc.add_text(label=DocItemLabel.TEXT, text=paragraph, prov=prov(page_no))
     return doc
+
+
+def blank_document(page_count: int) -> DoclingDocument:
+    """Return an empty document with ``page_count`` source pages."""
+    doc = DoclingDocument(name="doc")
+    for page_no in range(1, page_count + 1):
+        doc.add_page(page_no=page_no, size=Size(width=612, height=792))
+    return doc
