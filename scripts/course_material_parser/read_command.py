@@ -22,7 +22,7 @@ MATERIAL is the material's folder path under library_root, for example ml/prml.
 Page numbers are always source-PDF pages counted from 1, not printed page numbers.
 
 commands:
-  list    list ready materials
+  list    list ready materials, optionally under a PREFIX folder
   toc     show a material's table of contents
   get     print a material's Markdown
 
@@ -60,7 +60,7 @@ def _run(argv: Sequence[str] | None, settings_path: Path | None) -> str:
     args = _build_parser().parse_args(argv)
     settings = load_settings(settings_path)
     if args.command == "list":
-        return json_line(_list(settings))
+        return json_line(_list(settings, args.prefix))
     if args.command == "toc":
         return json_line(_toc(settings, args.source))
     return _get(settings, args.source, args.id, args.pages)
@@ -71,10 +71,18 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="read", description=_DESCRIPTION, formatter_class=argparse.RawTextHelpFormatter
     )
     commands = parser.add_subparsers(dest="command", required=True, metavar="<command>")
-    commands.add_parser(
+    list_ = commands.add_parser(
         "list",
-        description="List ready materials as JSON, sorted by MATERIAL.",
+        description="List ready materials as JSON, sorted by MATERIAL. Materials still being "
+        "parsed, failed, or interrupted are not listed.",
         help="list ready materials",
+    )
+    list_.add_argument(
+        "prefix",
+        nargs="?",
+        metavar="PREFIX",
+        help="only materials in this folder, matched by whole folder names: ml matches "
+        "ml/prml, not mlx/prml",
     )
     toc = commands.add_parser(
         "toc",
@@ -98,11 +106,11 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _list(settings: Settings) -> dict:
+def _list(settings: Settings, prefix: str | None) -> dict:
     return {
         "materials": [
             {"source": m.material_id, "type": m.record.type, "pages": m.record.pages}
-            for m in material_store.ready_materials(settings.library_root)
+            for m in material_store.ready_materials(settings.library_root, prefix)
         ]
     }
 

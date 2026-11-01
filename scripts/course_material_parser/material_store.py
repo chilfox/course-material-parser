@@ -34,6 +34,7 @@ class MaterialType(StrEnum):
 class Status(StrEnum):
     """Where a material is in its lifecycle; only ``READY`` material is readable."""
 
+    PENDING = "pending"
     READY = "ready"
     FAILED = "failed"
 
@@ -81,7 +82,7 @@ def check_destination(library_root: Path, material_id: str) -> Path:
             ``destination_exists`` when the folder already exists, even empty.
     """
     segments = material_id.split("/")
-    if not all(_SEGMENT.fullmatch(segment) for segment in segments):
+    if not _is_well_formed(material_id):
         raise CliError(
             "invalid_request",
             f"invalid destination '{material_id}': use a relative path of folder names made "
@@ -108,6 +109,11 @@ def check_destination(library_root: Path, material_id: str) -> Path:
     if path.exists() or path.is_symlink():
         raise _destination_exists(material_id)
     return path
+
+
+def _is_well_formed(material_id: str) -> bool:
+    """Return whether ``material_id`` follows the folder-name rules of a material id."""
+    return all(_SEGMENT.fullmatch(segment) for segment in material_id.split("/"))
 
 
 def _refuse_links_leaving(library_root: Path, material_id: str) -> None:
@@ -176,36 +182,72 @@ def write_record(material_dir: Path, record: MaterialRecord) -> None:
     os.replace(handle.name, material_dir / _METADATA_FILE)
 
 
-def ready_materials(library_root: Path) -> list[Material]:
+def ready_materials(library_root: Path, prefix: str | None = None) -> list[Material]:
     """Return every ready material under ``library_root``, sorted by material id.
 
-    Discovery stops at a material folder and never descends into it.
+    With ``prefix``, only materials whose id is ``prefix`` or starts with ``prefix/``:
+    whole path segments, so ``ml`` matches ``ml/prml`` but not ``mlx/a``. Discovery stops
+    at a material folder and never descends into it, and skips hidden folders.
+
+    Raises:
+        CliError: ``invalid_request`` when ``prefix`` isn't a well-formed material id.
     """
+    if prefix is not None and not _is_well_formed(prefix):
+        raise CliError(
+            "invalid_request",
+            f"invalid prefix '{prefix}': use leading folder names of a material id, "
+            "for example ml, with no leading or trailing '/'",
+        )
     found: list[Material] = []
     for directory, subdirs, files in os.walk(library_root):
         if _METADATA_FILE in files:
             subdirs.clear()
             material = _load(library_root, Path(directory))
-            if material.record.status is Status.READY:
+            if material.record.status is Status.READY and _has_prefix(material.material_id, prefix):
                 found.append(material)
         else:
             subdirs[:] = [name for name in subdirs if not name.startswith(".")]
     return sorted(found, key=lambda material: material.material_id)
 
 
+def _has_prefix(material_id: str, prefix: str | None) -> bool:
+    return prefix is None or material_id == prefix or material_id.startswith(prefix + "/")
+
+
 def get_ready_material(library_root: Path, material_id: str) -> Material:
     """Return the ready material with exactly the id ``material_id``.
 
+    The id is matched exactly, as discovery would list it: no fuzzy, case-insensitive,
+    or ``.``/``..`` matching, and no symlinked folders, which discovery doesn't follow.
+
     Raises:
-        CliError: ``not_found`` when no material has that id or it isn't ready.
+        CliError: ``not_found`` when no material has that id, naming its status when
+            it exists but isn't ready.
     """
     path = library_root / material_id
-    if not (path / _METADATA_FILE).is_file():
+    if not (_exists_exactly(library_root, material_id) and (path / _METADATA_FILE).is_file()):
         raise CliError("not_found", f"no ready material '{material_id}'")
     material = _load(library_root, path)
     if material.record.status is not Status.READY:
         raise CliError("not_found", f"{material_id} is not ready ({material.record.status})")
     return material
+
+
+def _exists_exactly(library_root: Path, material_id: str) -> bool:
+    """Return whether ``material_id`` names a real folder, spelled exactly as on disk.
+
+    Checking each name against its parent's listing matters on case-insensitive file
+    systems, where ``ML/Deck`` would otherwise open ``ml/deck`` under a second id.
+    """
+    if not _is_well_formed(material_id):
+        return False
+    parent = library_root
+    for segment in material_id.split("/"):
+        path = parent / segment
+        if path.is_symlink() or not path.is_dir() or segment not in os.listdir(parent):
+            return False
+        parent = path
+    return True
 
 
 def _load(library_root: Path, path: Path) -> Material:
