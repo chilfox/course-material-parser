@@ -1,19 +1,18 @@
 """Shared fixtures for the CLI seam: a temporary library, its settings file, and runners."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from doc_builders import slide_deck
-from docling_core.types.doc import DoclingDocument
-
 from course_material_parser import parse_command, read_command
 from course_material_parser.docling_conversion import (
     ConversionFailed,
     Converted,
     PartiallyConverted,
 )
+from doc_builders import slide_deck
+from docling_core.types.doc import DoclingDocument
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 TEXT_LAYER_PDF = FIXTURES / "text_layer.pdf"
@@ -43,14 +42,18 @@ class FakeConverter:
     """Stands in for Docling at the docling_conversion boundary.
 
     Set ``failure`` to report a failed conversion, plus ``partial`` for a partial one.
+    ``calls`` records the ``ocr`` choice of every conversion, in order, so tests can check
+    what reached the converter and whether it was called at all.
     """
 
     document: DoclingDocument | None = None
     failure: str | None = None
     partial: bool = False
+    calls: list[dict] = field(default_factory=list)
 
     def convert(self, pdf: Path, *, device: str, ocr: bool):
-        """Return the configured outcome without looking at the PDF."""
+        """Record the call and return the configured outcome without looking at the PDF."""
+        self.calls.append({"ocr": ocr})
         if self.failure is not None and self.partial:
             return PartiallyConverted(document=self.document, message=self.failure)
         if self.failure is not None:
