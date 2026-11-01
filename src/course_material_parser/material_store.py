@@ -77,8 +77,8 @@ def check_destination(library_root: Path, material_id: str) -> Path:
 
     Raises:
         CliError: ``invalid_request`` when the id breaks those rules or lies inside an
-            existing material; ``destination_exists`` when the folder already exists,
-            even empty.
+            existing material or under an existing file; ``destination_exists`` when the
+            folder already exists, even empty.
     """
     segments = material_id.split("/")
     if not all(_SEGMENT.fullmatch(segment) for segment in segments):
@@ -89,7 +89,15 @@ def check_destination(library_root: Path, material_id: str) -> Path:
         )
     for depth in range(1, len(segments)):
         ancestor = "/".join(segments[:depth])
-        if (library_root / ancestor / _METADATA_FILE).exists():
+        ancestor_path = library_root / ancestor
+        # A file (or dangling link) here would make creating the folders fail part way.
+        if (ancestor_path.exists() or ancestor_path.is_symlink()) and not ancestor_path.is_dir():
+            raise CliError(
+                "invalid_request",
+                f"invalid destination {material_id}: {ancestor} exists and is not a folder; "
+                "choose a destination outside it",
+            )
+        if (ancestor_path / _METADATA_FILE).exists():
             raise CliError(
                 "invalid_request",
                 f"invalid destination {material_id}: it is inside material {ancestor}; "
