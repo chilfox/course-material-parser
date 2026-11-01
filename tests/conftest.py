@@ -5,6 +5,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
+from docling_core.types.doc import DoclingDocument
+
 from course_material_parser import parse_command, read_command
 from course_material_parser.docling_conversion import (
     ConversionFailed,
@@ -12,10 +14,10 @@ from course_material_parser.docling_conversion import (
     PartiallyConverted,
 )
 from doc_builders import slide_deck
-from docling_core.types.doc import DoclingDocument
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 TEXT_LAYER_PDF = FIXTURES / "text_layer.pdf"
+IMAGE_ONLY_PDF = FIXTURES / "image_only.pdf"
 
 
 @dataclass

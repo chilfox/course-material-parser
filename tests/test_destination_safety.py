@@ -3,8 +3,8 @@
 import json
 
 import pytest
-from conftest import TEXT_LAYER_PDF, assert_error
 
+from conftest import TEXT_LAYER_PDF, assert_error
 from course_material_parser import pdf
 
 
