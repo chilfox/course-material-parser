@@ -90,7 +90,7 @@ def test_an_invalid_device_is_rejected(run_any, settings_path, library, value):
     assert_settings_error(run_any(), "device", "cpu, mps, cuda")
 
 
-def test_parse_rejects_an_unavailable_device_before_checking_the_destination(
+def test_parse_start_reports_an_unavailable_device_ahead_of_an_invalid_destination(
     run_parse, settings_path, library, monkeypatch
 ):
     monkeypatch.setattr(settings_module, "device_available", lambda device: device == "cpu")
