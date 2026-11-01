@@ -1,16 +1,26 @@
 """Write ``<page N>``-marked Markdown from a DoclingDocument.
 
 This module owns every Markdown rule of parsed material, so that changing marker syntax
-or adding a finer-grained selector stays local to it and its selector type. Content
-serialization is delegated to docling-core's public Markdown serializer.
+or adding a finer-grained selector stays local to it and its selector type. Text,
+formulas (LaTeX math), and tables (Markdown tables) are delegated to docling-core's public
+Markdown serializer; content Docling did not recognize passes through as emitted.
+Pictures use an own serializer.
 """
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 
+from docling_core.transforms.serializer.base import (
+    BaseDocSerializer,
+    BasePictureSerializer,
+    SerializationResult,
+)
+from docling_core.transforms.serializer.common import create_ser_result
 from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
-from docling_core.types.doc import DocItem, DoclingDocument, NodeItem
+from docling_core.types.doc import ContentLayer, DocItem, DoclingDocument, NodeItem, PictureItem
+
+_VISUAL_MARKER = "<visual>"
 
 
 @dataclass(frozen=True)
@@ -27,37 +37,62 @@ Selector = PdfPages
 
 
 def write_markdown(doc: DoclingDocument, selector: Selector) -> str:
-    """Return the selected content of ``doc`` as Markdown with a ``<page N>`` marker per page.
+    """Return the selected content of ``doc`` as Markdown with ``<page N>`` markers.
 
-    Every page in the selection gets a marker, even when it has no content. Each top-level
-    body item is written under the first source page of its provenance.
+    Every page in the selection gets a marker, even when it has no content. A top-level
+    body item is selected when any of its source pages falls in the selection, and is
+    written whole under the first of its source pages, which can lie before the
+    selection. Furniture (running headers and footers) is never written.
     """
-    serializer = MarkdownDocSerializer(doc=doc)
-    blocks_by_page: dict[int, list[str]] = {
-        page: [] for page in range(selector.start, selector.end + 1)
-    }
-    for item in doc.body.children:
-        node = item.resolve(doc)
-        page = _first_page(doc, node)
-        if page not in blocks_by_page:
+    serializer = MarkdownDocSerializer(doc=doc, picture_serializer=_VisualSerializer())
+    selected = range(selector.start, selector.end + 1)
+    blocks_by_page: dict[int, list[str]] = {page: [] for page in selected}
+    for child in doc.body.children:
+        node = child.resolve(doc)
+        if node.content_layer is not ContentLayer.BODY:
+            continue
+        pages = _pages(doc, node)
+        if not any(page in selected for page in pages):
             continue
         text = serializer.serialize(item=node).text
         if text:
-            blocks_by_page[page].append(text)
+            # A spanning item stays whole and under its first page, so a marker always
+            # means "content below starts on this page" and is never cut mid-item.
+            blocks_by_page.setdefault(min(pages), []).append(text)
 
-    sections = ["\n\n".join([f"<page {page}>", *blocks]) for page, blocks in blocks_by_page.items()]
+    sections = [
+        "\n\n".join([f"<page {page}>", *blocks_by_page[page]]) for page in sorted(blocks_by_page)
+    ]
     return "\n\n".join(sections) + "\n"
 
 
-def _first_page(doc: DoclingDocument, node: NodeItem) -> int | None:
-    """Return the first source page of ``node`` or of its first descendant with provenance."""
-    for item in _doc_items(doc, node):
-        if item.prov:
-            return item.prov[0].page_no
-    return None
+def _pages(doc: DoclingDocument, node: NodeItem) -> set[int]:
+    """Return every source page in the provenance of ``node`` and its descendants."""
+    return {prov.page_no for item in _doc_items(doc, node) for prov in item.prov}
 
 
 def _doc_items(doc: DoclingDocument, node: NodeItem) -> Iterator[DocItem]:
     for item, _level in doc.iterate_items(root=node, with_groups=True):
         if isinstance(item, DocItem):
             yield item
+
+
+class _VisualSerializer(BasePictureSerializer):
+    """Write a picture as ``<visual>`` followed by its detected caption, if any.
+
+    Docling's own image placeholder is not page-aware and says nothing about the
+    picture, so a reader could not tell which source page to render.
+    """
+
+    def serialize(
+        self,
+        *,
+        item: PictureItem,
+        doc_serializer: BaseDocSerializer,
+        doc: DoclingDocument,
+        **kwargs: Any,
+    ) -> SerializationResult:
+        """Return the visual marker line for ``item``."""
+        caption = item.caption_text(doc).strip()
+        text = f"{_VISUAL_MARKER} {caption}" if caption else _VISUAL_MARKER
+        return create_ser_result(text=text, span_source=item)
