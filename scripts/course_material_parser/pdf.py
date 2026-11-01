@@ -1,12 +1,16 @@
 """The pypdfium2 boundary: facts about source PDFs that don't need Docling."""
 
-from collections.abc import Iterator
+import io
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
 import pypdfium2
 
 from course_material_parser.cli_output import CliError
+
+RENDER_DPI = 150
+"""The one resolution page renders use: legible for slides and textbook pages alike."""
 
 
 @contextmanager
@@ -37,3 +41,31 @@ def page_count(pdf: Path) -> int:
     """
     with opened(pdf) as document:
         return len(document)
+
+
+class RenderFailed(Exception):
+    """A page of a PDF could not be rendered; the message says why."""
+
+
+def render_pngs(pdf: Path, pages: Iterable[int]) -> Iterator[tuple[int, bytes]]:
+    """Yield each of ``pages`` (counted from 1) of ``pdf`` as PNG bytes at ``RENDER_DPI``.
+
+    The PDF is opened once and stays open until the iteration ends.
+
+    Raises:
+        RenderFailed: when the PDF can't be opened or a page can't be rendered.
+    """
+    try:
+        with opened(pdf) as document:
+            for page in pages:
+                try:
+                    image = document[page - 1].render(scale=RENDER_DPI / 72).to_pil()
+                except (pypdfium2.PdfiumError, IndexError) as error:
+                    raise RenderFailed(f"page {page} could not be rendered ({error})") from None
+                png = io.BytesIO()
+                image.save(png, "PNG")
+                yield page, png.getvalue()
+    except CliError as error:
+        raise RenderFailed(error.message) from None
+    except OSError as error:
+        raise RenderFailed(f"can't read {pdf} ({error.strerror})") from None

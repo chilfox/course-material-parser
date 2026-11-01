@@ -165,12 +165,12 @@ source = { editable = "." }
 dependencies = [
     { name = "docling" },
     { name = "docling-core" },
+    { name = "pillow" },
     { name = "pypdfium2" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "pillow" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -179,12 +179,12 @@ dev = [
 requires-dist = [
     { name = "docling", specifier = ">=2.145.0" },
     { name = "docling-core", specifier = ">=2.105.0" },
+    { name = "pillow", specifier = ">=13.0.0" },
     { name = "pypdfium2", specifier = ">=5.14.0" },
 ]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "pillow", specifier = ">=13.0.0" },
     { name = "pytest", specifier = ">=9.2.0" },
     { name = "ruff", specifier = ">=0.17.3" },
 ]

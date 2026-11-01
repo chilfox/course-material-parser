@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import assert_never
 
-from course_material_parser import material_store
+from course_material_parser import material_store, page_renders
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
 from course_material_parser.material_store import Material, MaterialType
 from course_material_parser.page_blocks import join_page_blocks, split_page_blocks
@@ -25,6 +25,9 @@ commands:
   list    list ready materials
   toc     show a material's table of contents
   get     print a material's Markdown
+  render  render source pages to PNG
+  clean-renders
+          delete rendered page images
 
 See `read <command> --help` for details."""
 
@@ -47,6 +50,18 @@ Markers in the Markdown:
             is enough. Render that page only if the content can't be understood
             without it."""
 
+_RENDER_DESCRIPTION = """\
+Render source pages of a material to PNG and print their files as JSON. The files are
+under dir.
+
+Files stay available until the user cleans them up; rendering a page again recreates its
+file."""
+
+_CLEAN_RENDERS_DESCRIPTION = """\
+Deletes rendered page images. Run only when the user asks.
+
+Prints the number of files and bytes removed as JSON."""
+
 
 def main(argv: Sequence[str] | None = None, *, settings_path: Path | None = None) -> int:
     """Run the CLI with ``argv`` (default ``sys.argv[1:]``) and return the exit code.
@@ -63,6 +78,10 @@ def _run(argv: Sequence[str] | None, settings_path: Path | None) -> str:
         return json_line(_list(settings))
     if args.command == "toc":
         return json_line(_toc(settings, args.source))
+    if args.command == "render":
+        return json_line(_render(settings, args.source, args.pages))
+    if args.command == "clean-renders":
+        return json_line(_clean_renders(settings, args.source, confirm=args.confirm))
     return _get(settings, args.source, args.id, args.pages)
 
 
@@ -95,6 +114,24 @@ def _build_parser() -> argparse.ArgumentParser:
     get.add_argument(
         "--confirm", action="store_true", help="read a chapter even when it is over the size limit"
     )
+    render = commands.add_parser(
+        "render",
+        description=_RENDER_DESCRIPTION,
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="render source pages to PNG",
+    )
+    render.add_argument("--source", required=True, metavar="MATERIAL", help="exact material id")
+    render.add_argument("--pages", required=True, metavar="SPEC", help=PAGES_HELP)
+    clean = commands.add_parser(
+        "clean-renders",
+        description=_CLEAN_RENDERS_DESCRIPTION,
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="delete rendered page images",
+    )
+    scope = clean.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--source", metavar="MATERIAL", help="exact material id")
+    scope.add_argument("--all", action="store_true", help="every material; needs --confirm")
+    clean.add_argument("--confirm", action="store_true", help="confirm deleting with --all")
     return parser
 
 
@@ -115,6 +152,31 @@ def _toc(settings: Settings, source: str) -> dict:
             return {"source": source, "type": material.record.type, "pages": material.record.pages}
         case unhandled:
             assert_never(unhandled)
+
+
+def _render(settings: Settings, source: str, pages: str) -> dict:
+    material = material_store.get_ready_material(settings.library_root, source)
+    selected = parse_pages(pages, material_id=source, page_count=material.record.pages)
+    renders = page_renders.render(material, selected)
+    return {
+        "dir": str(renders.dir),
+        "pages": [{"page": page, "file": file} for page, file in renders.files],
+    }
+
+
+def _clean_renders(settings: Settings, source: str | None, *, confirm: bool) -> dict:
+    if source is not None:
+        materials = [material_store.get_ready_material(settings.library_root, source)]
+    elif confirm:
+        materials = material_store.ready_materials(settings.library_root)
+    else:
+        raise CliError(
+            "confirm_required",
+            "--all deletes the renders of every material; re-run with --confirm only if the "
+            "user asked for it",
+        )
+    removed = sum((page_renders.clean(m) for m in materials), page_renders.Removed())
+    return {"files": removed.files, "bytes": removed.bytes}
 
 
 def _get(settings: Settings, source: str, unit_id: str | None, pages: str | None) -> str:
