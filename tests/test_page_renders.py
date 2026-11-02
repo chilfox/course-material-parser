@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import TEXT_LAYER_PDF, assert_error, parse_slides
+from conftest import assert_error, parse_slides, start_parse
 
 PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
@@ -77,7 +77,7 @@ def test_an_unrenderable_source_fails_with_render_failed(run_parse, run_read, li
 
 def test_renders_are_only_for_ready_material(run_parse, run_read, converter):
     converter.failure = "page 2 timed out"
-    run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", "ml/deck", "--type", "slides")
+    start_parse(run_parse)
 
     for source in ["ml/deck", "ml/nothing"]:
         result = run_read("render", "--source", source, "--pages", "1")

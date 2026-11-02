@@ -1,20 +1,18 @@
 """CLI seam: failed parses are never published, and only ready material is visible."""
 
-import json
-
 import pytest
 from docling_core.types.doc import DocItemLabel
 
-from conftest import TEXT_LAYER_PDF, assert_error, parse_slides
+from conftest import (
+    TEXT_LAYER_PDF,
+    assert_error,
+    material_status,
+    parse_slides,
+    record_path,
+    set_material_status,
+    start_parse,
+)
 from doc_builders import prov, slide_deck
-
-
-def _start(run_parse, dest: str = "ml/deck"):
-    return run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", dest, "--type", "slides")
-
-
-def _status(library, dest: str = "ml/deck") -> str:
-    return json.loads((library / dest / "material.json").read_text())["status"]
 
 
 def test_body_items_without_a_source_page_fail_the_parse_with_count_and_kinds(
@@ -27,7 +25,7 @@ def test_body_items_without_a_source_page_fail_the_parse_with_count_and_kinds(
     doc.add_picture()
     converter.document = doc
 
-    result = _start(run_parse)
+    result = start_parse(run_parse)
 
     assert_error(
         result,
@@ -35,7 +33,7 @@ def test_body_items_without_a_source_page_fail_the_parse_with_count_and_kinds(
         "3 text items, 1 formula, 1 picture have no source page",
         "ml/deck",
     )
-    assert _status(library) == "failed"
+    assert material_status(library) == "failed"
     assert (library / "ml" / "deck" / "source.pdf").is_file()
     assert run_read("list").json == {"materials": []}
 
@@ -45,7 +43,7 @@ def test_a_single_unplaced_item_is_reported_in_the_singular(run_parse, converter
     doc.add_text(label=DocItemLabel.TEXT, text="Floating text.")
     converter.document = doc
 
-    assert_error(_start(run_parse), "conversion_failed", "1 text item has no source page")
+    assert_error(start_parse(run_parse), "conversion_failed", "1 text item has no source page")
 
 
 def test_furniture_without_a_source_page_does_not_fail_the_parse(run_parse, converter):
@@ -58,7 +56,7 @@ def test_furniture_without_a_source_page_does_not_fail_the_parse(run_parse, conv
     doc.add_text(label=DocItemLabel.TEXT, text="Placed.", prov=prov(1))
     converter.document = doc
 
-    assert _start(run_parse).exit_code == 0
+    assert start_parse(run_parse).exit_code == 0
 
 
 @pytest.mark.parametrize("failure", ["failed", "partial", "missing provenance"])
@@ -71,11 +69,11 @@ def test_a_failed_material_holds_only_the_source_pdf_and_its_record(
         converter.failure = "page 2 timed out"
         converter.partial = failure == "partial"
 
-    assert_error(_start(run_parse), "conversion_failed")
+    assert_error(start_parse(run_parse), "conversion_failed")
 
     material = library / "ml" / "deck"
     assert sorted(p.name for p in material.iterdir()) == ["material.json", "source.pdf"]
-    assert _status(library) == "failed"
+    assert material_status(library) == "failed"
 
 
 @pytest.mark.parametrize(
@@ -83,7 +81,7 @@ def test_a_failed_material_holds_only_the_source_pdf_and_its_record(
 )
 def test_a_failed_material_is_rejected_with_its_status(run_parse, run_read, converter, command):
     converter.failure = "page 2 timed out"
-    _start(run_parse)
+    start_parse(run_parse)
 
     result = run_read(*command)
 
@@ -93,12 +91,12 @@ def test_a_failed_material_is_rejected_with_its_status(run_parse, run_read, conv
 
 def test_retrying_a_failed_parse_requires_a_new_destination(run_parse, converter):
     converter.failure = "page 2 timed out"
-    _start(run_parse)
+    start_parse(run_parse)
     converter.failure = None
 
-    assert_error(_start(run_parse), "destination_exists", "ml/deck")
-    assert_error(_start(run_parse), "destination_exists")
-    assert _start(run_parse, "ml/deck-retry").exit_code == 0
+    assert_error(start_parse(run_parse), "destination_exists", "ml/deck")
+    assert_error(start_parse(run_parse), "destination_exists")
+    assert start_parse(run_parse, dest="ml/deck-retry").exit_code == 0
 
 
 def _interrupt(library, dest: str = "ml/deck") -> None:
@@ -106,11 +104,6 @@ def _interrupt(library, dest: str = "ml/deck") -> None:
     folder = library / dest
     folder.mkdir(parents=True)
     (folder / "source.pdf").write_bytes(TEXT_LAYER_PDF.read_bytes())
-
-
-def _set_status(library, dest: str, status: str) -> None:
-    path = library / dest / "material.json"
-    path.write_text(json.dumps({**json.loads(path.read_text()), "status": status}))
 
 
 def test_an_interrupted_parse_is_ignored_by_list_and_rejected_by_get(run_parse, run_read, library):
@@ -126,7 +119,7 @@ def test_an_interrupted_parse_is_ignored_by_list_and_rejected_by_get(run_parse, 
 def test_an_interrupted_parse_is_refused_as_an_existing_destination(run_parse, library):
     _interrupt(library)
 
-    assert_error(_start(run_parse), "destination_exists", "ml/deck")
+    assert_error(start_parse(run_parse), "destination_exists", "ml/deck")
     assert sorted(p.name for p in (library / "ml" / "deck").iterdir()) == ["source.pdf"]
 
 
@@ -134,7 +127,7 @@ def test_a_pending_material_is_hidden_from_list_and_rejected_with_its_status(
     run_parse, run_read, library
 ):
     parse_slides(run_parse, "ml/prm")
-    _set_status(library, "ml/prm", "pending")
+    set_material_status(library, "ml/prm", "pending")
 
     assert run_read("list").json == {"materials": []}
     result = run_read("toc", "--source", "ml/prm")
@@ -177,6 +170,6 @@ def test_discovery_never_descends_into_a_material(run_parse, run_read, library):
     parse_slides(run_parse, "other")
     nested = library / "ml" / "deck" / "contents" / "copy"
     nested.mkdir()
-    (nested / "material.json").write_text((library / "other" / "material.json").read_text())
+    (nested / "material.json").write_text(record_path(library, "other").read_text())
 
     assert [m["source"] for m in run_read("list").json["materials"]] == ["ml/deck", "other"]
