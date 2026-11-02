@@ -14,6 +14,7 @@ from course_material_parser.cli_output import CliError, JsonArgumentParser, json
 from course_material_parser.docling_conversion import (
     ConversionFailed,
     ConversionOutcome,
+    Converted,
     Converter,
     PartiallyConverted,
 )
@@ -170,20 +171,26 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
     shutil.copyfile(source, retained_pdf)
     outcome = converter.convert(retained_pdf, device=settings.device, ocr=bool(args.ocr))
 
-    def record(status: Status) -> MaterialRecord:
-        return MaterialRecord(
-            type=material_type, status=status, source_filename=source.name, pages=pages
-        )
-
     problem = _conversion_problem(outcome)
     if problem is not None:
-        raise _fail(destination, record(Status.FAILED), args.dest, problem)
+        _mark_failed(destination, material_type, source.name, pages)
+        raise CliError(
+            "conversion_failed",
+            f"{problem}; {args.dest} is marked failed, retry with a new destination",
+        )
+    # Narrowed for the reader and the type checker: only a full conversion has no problem.
+    assert isinstance(outcome, Converted)
 
     material_store.write_slides(
         destination, write_markdown(outcome.document, PdfPages(start=1, end=pages))
     )
     # Written last, so a material is only ever visible as ready once all its contents exist.
-    material_store.write_record(destination, record(Status.READY))
+    material_store.write_record(
+        destination,
+        MaterialRecord(
+            type=material_type, status=Status.READY, source_filename=source.name, pages=pages
+        ),
+    )
     return {"source": args.dest, "type": material_type, "status": Status.READY, "pages": pages}
 
 
@@ -200,14 +207,15 @@ def _conversion_problem(outcome: ConversionOutcome) -> str | None:
     return missing_provenance(outcome.document)
 
 
-def _fail(destination: Path, record: MaterialRecord, material_id: str, problem: str) -> CliError:
-    """Mark the material at ``destination`` failed and return the ``conversion_failed`` error.
+def _mark_failed(
+    destination: Path, material_type: MaterialType, source_filename: str, pages: int
+) -> None:
+    """Write a ``failed`` record for the material at ``destination``.
 
-    Shared by every material type. What already exists in the folder is kept for
-    inspection; ``record`` must have status ``failed``.
+    Shared by every material type. It runs before any contents are written, so the folder
+    is left holding only the retained source PDF and this record.
     """
-    material_store.write_record(destination, record)
-    return CliError(
-        "conversion_failed",
-        f"{problem}; {material_id} is marked failed, retry with a new destination",
+    record = MaterialRecord(
+        type=material_type, status=Status.FAILED, source_filename=source_filename, pages=pages
     )
+    material_store.write_record(destination, record)
