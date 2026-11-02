@@ -13,6 +13,7 @@ from conftest import (
     plan_unit,
     record_path,
     start_parse,
+    write_settings,
 )
 from doc_builders import paged_book
 
@@ -230,6 +231,76 @@ def test_unit_get_accepts_and_ignores_confirm(run_parse, run_read, plan_file):
 
     assert result.exit_code == 0, result.stderr
     assert result.stdout.startswith("<page 9>")
+
+
+CHAPTER_1 = "".join(f"<page {page}>\n\nText on page {page}.\n\n" for page in range(2, 9))[:-1]
+
+
+def test_chapter_get_joins_its_units_in_order_with_the_shared_boundary_page_once(
+    run_parse, run_read, plan_file
+):
+    finalize(run_parse)
+
+    result = run_read("get", "--source", DEST, "--id", "chapter-1")
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == CHAPTER_1
+    assert result.stdout.count("<page 4>") == 1
+
+
+def test_chapter_get_over_the_configured_limit_is_too_large_with_its_size_by_unit(
+    run_parse, run_read, settings_path, library, plan_file
+):
+    finalize(run_parse)
+    write_settings(settings_path, library, "combined_read_max_chars = 187\n")
+
+    result = run_read("get", "--source", DEST, "--id", "chapter-1")
+
+    assert_error(result, "too_large", "chapter-1", "--confirm")
+    assert result.error["chars"] == len(CHAPTER_1) == 188
+    assert result.error["limit"] == 187
+    assert result.error["units"] == [
+        {"id": "1-intro", "title": "Introduction", "chars": 26},
+        {"id": "1-1", "title": "Curve Fitting", "chars": 53},
+        {"id": "1-2", "title": "Probability", "chars": 134},
+    ]
+
+
+def test_chapter_get_with_confirm_prints_the_whole_chapter_over_the_limit(
+    run_parse, run_read, settings_path, library, plan_file
+):
+    finalize(run_parse)
+    write_settings(settings_path, library, "combined_read_max_chars = 1\n")
+
+    result = run_read("get", "--source", DEST, "--id", "chapter-1", "--confirm")
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == CHAPTER_1
+
+
+def test_chapter_get_exactly_at_the_limit_is_printed(
+    run_parse, run_read, settings_path, library, plan_file
+):
+    finalize(run_parse)
+    write_settings(settings_path, library, "combined_read_max_chars = 188\n")
+
+    result = run_read("get", "--source", DEST, "--id", "chapter-1")
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout == CHAPTER_1
+
+
+@pytest.mark.parametrize("confirm", [[], ["--confirm"]])
+def test_unit_get_is_never_size_checked(
+    run_parse, run_read, settings_path, library, plan_file, confirm
+):
+    finalize(run_parse)
+    write_settings(settings_path, library, "combined_read_max_chars = 1\n")
+
+    result = run_read("get", "--source", DEST, "--id", "1-2", *confirm)
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.startswith("<page 4>")
 
 
 @pytest.mark.parametrize(

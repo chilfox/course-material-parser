@@ -2,7 +2,7 @@
 
 import pytest
 
-from conftest import assert_error, parse_slides
+from conftest import assert_error, parse_slides, write_settings
 from doc_builders import slide_deck
 
 
@@ -26,6 +26,20 @@ def test_slide_page_cut_includes_a_bare_marker_for_an_empty_page(run_parse, run_
 
     assert result.exit_code == 0, result.stderr
     assert result.stdout == "<page 1>\n\n## Only slide\n\nBody.\n\n<page 2>\n"
+
+
+@pytest.mark.parametrize("selector", [[], ["--pages", "1-2"]])
+@pytest.mark.parametrize("confirm", [[], ["--confirm"]])
+def test_slide_get_is_never_size_checked(
+    run_parse, run_read, settings_path, library, selector, confirm
+):
+    parse_slides(run_parse)
+    write_settings(settings_path, library, "combined_read_max_chars = 1\n")
+
+    result = run_read("get", "--source", "ml/week3-slides", *selector, *confirm)
+
+    assert result.exit_code == 0, result.stderr
+    assert result.stdout.startswith("<page 1>")
 
 
 def test_slide_toc_gives_source_type_and_page_count(run_parse, run_read):

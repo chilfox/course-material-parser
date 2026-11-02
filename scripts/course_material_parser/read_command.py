@@ -82,7 +82,7 @@ def _run(argv: Sequence[str] | None, settings_path: Path | None) -> str:
         return json_line(_render(settings, args.source, args.pages))
     if args.command == "clean-renders":
         return json_line(_clean_renders(settings, args.source, confirm=args.confirm))
-    return _get(settings, args.source, args.id, args.pages)
+    return _get(settings, args.source, args.id, args.pages, confirm=args.confirm)
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -216,7 +216,9 @@ def _clean_renders(settings: Settings, source: str | None, *, confirm: bool) -> 
     return {"files": removed.files, "bytes": removed.bytes}
 
 
-def _get(settings: Settings, source: str, unit_id: str | None, pages: str | None) -> str:
+def _get(
+    settings: Settings, source: str, unit_id: str | None, pages: str | None, *, confirm: bool
+) -> str:
     if unit_id is not None and pages is not None:
         raise CliError("invalid_request", "use either --id or --pages, not both")
     material = material_store.get_ready_material(settings.library_root, source)
@@ -225,12 +227,23 @@ def _get(settings: Settings, source: str, unit_id: str | None, pages: str | None
             # --confirm is accepted and ignored: slide reads are never size-checked.
             return _get_slides(material, unit_id, pages)
         case MaterialType.TEXTBOOK:
-            return _get_textbook(material, unit_id, pages)
+            return _get_textbook(
+                material,
+                unit_id,
+                pages,
+                max_chars=None if confirm else settings.combined_read_max_chars,
+            )
         case unhandled:
             assert_never(unhandled)
 
 
-def _get_textbook(material: Material, unit_id: str | None, pages: str | None) -> str:
+def _get_textbook(
+    material: Material, unit_id: str | None, pages: str | None, *, max_chars: int | None
+) -> str:
+    """Return a textbook unit or chapter by id.
+
+    ``max_chars`` limits chapters only, and ``None`` (from ``--confirm``) lifts the limit.
+    """
     source = material.material_id
     if pages is not None:
         raise CliError(
@@ -244,8 +257,43 @@ def _get_textbook(material: Material, unit_id: str | None, pages: str | None) ->
         # --confirm is accepted and ignored: unit reads are never size-checked.
         return material_store.unit_markdown(material.path, unit).read_text(encoding="utf-8")
     if any(chapter.id == unit_id for chapter in record.chapters):
-        raise NotImplementedError("chapter reads are not supported yet")
+        return _chapter_markdown(material, unit_id, max_chars=max_chars)
     raise CliError("unknown_id", f"unknown id '{unit_id}' in {source}")
+
+
+def _chapter_markdown(material: Material, chapter_id: str, *, max_chars: int | None) -> str:
+    """Return the chapter's units joined in reading order, each page block once.
+
+    Adjacent units can share their boundary page, and each holds that page's whole block,
+    so only its first occurrence is kept.
+
+    Raises:
+        CliError: ``too_large`` when the joined Markdown is longer than ``max_chars``.
+    """
+    units = [
+        (unit, material_store.unit_markdown(material.path, unit).read_text(encoding="utf-8"))
+        for unit in material.record.units
+        if unit.chapter == chapter_id
+    ]
+    blocks: dict[int, str] = {}
+    for _, markdown in units:
+        for page, block in split_page_blocks(markdown).items():
+            blocks.setdefault(page, block)
+    chapter = join_page_blocks(list(blocks.values()))
+    if max_chars is not None and len(chapter) > max_chars:
+        raise CliError(
+            "too_large",
+            f"chapter {chapter_id} is {len(chapter)} characters, over the limit of {max_chars}; "
+            "read its units one at a time with --id, or re-run with --confirm only if the "
+            "whole chapter is needed",
+            chars=len(chapter),
+            limit=max_chars,
+            units=[
+                {"id": unit.id, "title": unit.title, "chars": len(markdown)}
+                for unit, markdown in units
+            ],
+        )
+    return chapter
 
 
 def _get_slides(material: Material, unit_id: str | None, pages: str | None) -> str:
