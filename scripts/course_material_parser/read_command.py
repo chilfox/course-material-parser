@@ -155,9 +155,11 @@ def _list(settings: Settings, prefix: str | None) -> dict:
 def _toc(settings: Settings, source: str) -> dict:
     material = material_store.get_ready_material(settings.library_root, source)
     match material.record.type:
-        # Textbook tocs (chapters and units) add their case here.
         case MaterialType.SLIDES:
             return {"source": source, "type": material.record.type, "pages": material.record.pages}
+        case MaterialType.TEXTBOOK:
+            # Nothing finalizes a textbook into ready material yet, so this can't be reached.
+            raise NotImplementedError("textbook tocs are not supported yet")
         case unhandled:
             assert_never(unhandled)
 
@@ -192,10 +194,12 @@ def _get(settings: Settings, source: str, unit_id: str | None, pages: str | None
         raise CliError("invalid_request", "use either --id or --pages, not both")
     material = material_store.get_ready_material(settings.library_root, source)
     match material.record.type:
-        # Textbook reads (--id, size limit, --confirm) add their case here.
         case MaterialType.SLIDES:
             # --confirm is accepted and ignored: slide reads are never size-checked.
             return _get_slides(material, unit_id, pages)
+        case MaterialType.TEXTBOOK:
+            # Nothing finalizes a textbook into ready material yet, so this can't be reached.
+            raise NotImplementedError("textbook reads are not supported yet")
         case unhandled:
             assert_never(unhandled)
 
