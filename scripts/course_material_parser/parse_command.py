@@ -8,8 +8,11 @@ import argparse
 import shutil
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import assert_never
 
-from course_material_parser import material_store, pdf
+from docling_core.types.doc import DoclingDocument
+
+from course_material_parser import extraction, material_store, pdf
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
 from course_material_parser.docling_conversion import (
     ConversionFailed,
@@ -17,9 +20,12 @@ from course_material_parser.docling_conversion import (
     Converted,
     Converter,
     PartiallyConverted,
+    load_document,
+    save_document,
 )
 from course_material_parser.markdown_writer import PdfPages, write_markdown
-from course_material_parser.material_store import MaterialRecord, MaterialType, Status
+from course_material_parser.material_store import Material, MaterialRecord, MaterialType, Status
+from course_material_parser.page_spec import PAGES_HELP, parse_pages
 from course_material_parser.provenance import missing_provenance
 from course_material_parser.settings import Settings, load_settings, require_device_available
 
@@ -30,20 +36,38 @@ MATERIAL is the material's folder path under library_root, for example ml/prml.
 Page numbers are always source-PDF pages counted from 1, not printed page numbers.
 
 commands:
-  start   parse a source PDF into a new material
+  start    parse a source PDF into a new material
+  inspect  show a pending textbook's detected structure or page content
 
 See `parse <command> --help` for details."""
 
 _START_DESCRIPTION = """\
 Parse the source PDF into a new material at MATERIAL. The destination must not exist;
 missing parent folders are created. Slides become one Markdown deck with a marker per
-source page and are ready to read when this command succeeds.
+source page and are ready to read when this command succeeds. A textbook is extracted
+once and left pending: the result is its structure index (see `parse inspect --help`),
+including the extraction_id a split plan must name.
 
 OCR: without --ocr or --no-ocr, the PDF's text layer is checked first, and the parse is
 refused with ocr_required, reporting the count, when more than half the pages have no
 text layer. Then decide: --ocr to convert with OCR (refused with ocr_disabled when
 allow_ocr = false in settings.toml), or --no-ocr when only page renders matter, which
 skips the check."""
+
+_INSPECT_DESCRIPTION = """\
+Inspect a pending textbook's stored extraction as JSON, to plan its split without
+converting again. Detected structure is evidence, not an authoritative outline.
+
+Forms:
+  inspect --dest MATERIAL
+      the structure index: page count, detected headings in reading order with their
+      level (when detected) and first source page, status, and extraction_id.
+  inspect --dest MATERIAL --pages SPEC
+      the content of those source pages only: each item's ref, type, every source page
+      it lies on (an item spanning a boundary shows both), and its text. Use this to
+      check where a section starts; inspect a few pages at a time, not the whole book.
+
+Running headers and footers are left out of both."""
 
 
 def main(
@@ -65,6 +89,8 @@ def _run(
 ) -> str:
     args = _build_parser().parse_args(argv)
     settings = load_settings(settings_path)
+    if args.command == "inspect":
+        return json_line(_inspect(settings, args.dest, args.pages))
     return json_line(_start(args, settings, converter))
 
 
@@ -100,6 +126,14 @@ def _build_parser() -> argparse.ArgumentParser:
         const=False,
         help="convert without OCR and skip the text-layer check",
     )
+    inspect = commands.add_parser(
+        "inspect",
+        description=_INSPECT_DESCRIPTION,
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="show a pending textbook's detected structure or page content",
+    )
+    inspect.add_argument("--dest", required=True, metavar="MATERIAL", help="pending textbook")
+    inspect.add_argument("--pages", metavar="SPEC", help=f"show content of {PAGES_HELP}")
     return parser
 
 
@@ -181,17 +215,80 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
     # Narrowed for the reader and the type checker: only a full conversion has no problem.
     assert isinstance(outcome, Converted)
 
-    material_store.write_slides(
-        destination, write_markdown(outcome.document, PdfPages(start=1, end=pages))
-    )
-    # Written last, so a material is only ever visible as ready once all its contents exist.
-    material_store.write_record(
-        destination,
-        MaterialRecord(
-            type=material_type, status=Status.READY, source_filename=source.name, pages=pages
-        ),
-    )
-    return {"source": args.dest, "type": material_type, "status": Status.READY, "pages": pages}
+    match material_type:
+        case MaterialType.SLIDES:
+            material_store.write_slides(
+                destination, write_markdown(outcome.document, PdfPages(start=1, end=pages))
+            )
+            record = MaterialRecord(
+                type=material_type, status=Status.READY, source_filename=source.name, pages=pages
+            )
+        case MaterialType.TEXTBOOK:
+            stored = material_store.extraction_json(destination)
+            save_document(outcome.document, stored)
+            record = MaterialRecord(
+                type=material_type,
+                status=Status.PENDING,
+                source_filename=source.name,
+                pages=pages,
+                extraction_id=extraction.extraction_id(stored),
+            )
+        case unhandled:
+            assert_never(unhandled)
+    # Written last, so a material only ever shows a status once everything it needs exists.
+    material_store.write_record(destination, record)
+    if record.status is Status.PENDING:
+        return _structure_index(args.dest, record, outcome.document)
+    return {"source": args.dest, "type": material_type, "status": record.status, "pages": pages}
+
+
+def _structure_index(material_id: str, record: MaterialRecord, document: DoclingDocument) -> dict:
+    """Return the structure index of a pending textbook, as ``start`` and ``inspect`` print it."""
+    return {
+        "source": material_id,
+        "type": record.type,
+        "status": record.status,
+        "extraction_id": record.extraction_id,
+        "pages": record.pages,
+        "headings": extraction.headings(document),
+    }
+
+
+def _inspect(settings: Settings, material_id: str, pages: str | None) -> dict:
+    material = _pending_material(settings, material_id)
+    document = load_document(material_store.extraction_json(material.path))
+    if pages is None:
+        return _structure_index(material_id, material.record, document)
+    selected = parse_pages(pages, material_id=material_id, page_count=material.record.pages)
+    return {
+        "source": material_id,
+        "extraction_id": material.record.extraction_id,
+        "items": extraction.page_items(document, set(selected)),
+    }
+
+
+def _pending_material(settings: Settings, material_id: str) -> Material:
+    """Return the pending textbook ``material_id``, awaiting its split.
+
+    Raises:
+        CliError: ``not_found`` when there is no such material, naming its status when it
+            exists but isn't pending.
+    """
+    material = material_store.find_material(settings.library_root, material_id)
+    if material is None:
+        raise CliError(
+            "not_found", f"no material '{material_id}'; parse it first with `parse start`"
+        )
+    match material.record.status:
+        case Status.PENDING:
+            return material
+        case Status.READY:
+            fix = "it is already split; read it with `read`"
+        case Status.FAILED:
+            fix = "its parse failed; parse again into a new destination"
+        case unhandled:
+            assert_never(unhandled)
+    raise CliError("not_found", f"{material_id} is not pending ({material.record.status}): {fix}")
 
 
 def _conversion_problem(outcome: ConversionOutcome) -> str | None:

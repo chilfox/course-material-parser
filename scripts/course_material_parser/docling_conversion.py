@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from docling_core.types.doc import DoclingDocument
+from docling_core.types.doc import DoclingDocument, ImageRefMode
 
 
 @dataclass(frozen=True)
@@ -48,6 +48,20 @@ class Converter(Protocol):
     def convert(self, pdf: Path, *, device: str, ocr: bool) -> ConversionOutcome:
         """Convert ``pdf`` on ``device`` (``cpu``, ``mps``, or ``cuda``), with OCR if ``ocr``."""
         ...
+
+
+def save_document(document: DoclingDocument, path: Path) -> None:
+    """Save ``document`` losslessly as DoclingDocument JSON at ``path``.
+
+    Picture images are left out: renders come from the retained source PDF, and embedded
+    images would make the stored extraction of a long textbook very large.
+    """
+    document.save_as_json(path, image_mode=ImageRefMode.PLACEHOLDER)
+
+
+def load_document(path: Path) -> DoclingDocument:
+    """Load the DoclingDocument saved by ``save_document`` at ``path``."""
+    return DoclingDocument.load_from_json(path)
 
 
 class DoclingConverter:

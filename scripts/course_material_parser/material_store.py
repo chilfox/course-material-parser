@@ -20,6 +20,7 @@ _METADATA_FILE = "material.json"
 _SOURCE_PDF = "source.pdf"
 _CONTENTS_DIR = "contents"
 _SLIDES_FILE = "slides.md"
+_EXTRACTION_FILE = "extraction.json"
 # One folder name: letters, digits, ".", "_", "-", not starting with "." (so ".", "..",
 # and hidden folders, which discovery skips, are impossible).
 _SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
@@ -29,6 +30,7 @@ class MaterialType(StrEnum):
     """The kind of source PDF a material was parsed from."""
 
     SLIDES = "slides"
+    TEXTBOOK = "textbook"
 
 
 class Status(StrEnum):
@@ -41,12 +43,17 @@ class Status(StrEnum):
 
 @dataclass(frozen=True)
 class MaterialRecord:
-    """The contents of ``material.json``."""
+    """The contents of ``material.json``.
+
+    ``extraction_id`` identifies the stored extraction of a pending textbook, so a split
+    plan written for one extraction can't be applied to another; it is ``None`` otherwise.
+    """
 
     type: MaterialType
     status: Status
     source_filename: str
     pages: int
+    extraction_id: str | None = None
     format_version: int = FORMAT_VERSION
 
 
@@ -67,6 +74,11 @@ def source_pdf(material_dir: Path) -> Path:
 def slides_markdown(material_dir: Path) -> Path:
     """Return where a slide deck's Markdown lives."""
     return material_dir / _CONTENTS_DIR / _SLIDES_FILE
+
+
+def extraction_json(material_dir: Path) -> Path:
+    """Return where a pending textbook's stored DoclingDocument JSON lives."""
+    return material_dir / _EXTRACTION_FILE
 
 
 def check_destination(library_root: Path, material_id: str) -> Path:
@@ -174,7 +186,8 @@ def write_slides(material_dir: Path, markdown: str) -> None:
 
 def write_record(material_dir: Path, record: MaterialRecord) -> None:
     """Write ``material.json`` atomically, so readers never see a partial file."""
-    payload = json.dumps(asdict(record), indent=2) + "\n"
+    fields = {name: value for name, value in asdict(record).items() if value is not None}
+    payload = json.dumps(fields, indent=2) + "\n"
     write_atomically(material_dir / _METADATA_FILE, payload.encode("utf-8"))
 
 
@@ -225,13 +238,24 @@ def get_ready_material(library_root: Path, material_id: str) -> Material:
         CliError: ``not_found`` when no material has that id, naming its status when
             it exists but isn't ready.
     """
-    path = library_root / material_id
-    if not (_exists_exactly(library_root, material_id) and (path / _METADATA_FILE).is_file()):
+    material = find_material(library_root, material_id)
+    if material is None:
         raise CliError("not_found", f"no ready material '{material_id}'")
-    material = _load(library_root, path)
     if material.record.status is not Status.READY:
         raise CliError("not_found", f"{material_id} is not ready ({material.record.status})")
     return material
+
+
+def find_material(library_root: Path, material_id: str) -> Material | None:
+    """Return the material with exactly the id ``material_id``, whatever its status.
+
+    Returns ``None`` when no folder has that exact id or it holds no ``material.json``
+    (an interrupted parse). Matching is as strict as in ``get_ready_material``.
+    """
+    path = library_root / material_id
+    if not (_exists_exactly(library_root, material_id) and (path / _METADATA_FILE).is_file()):
+        return None
+    return _load(library_root, path)
 
 
 def _exists_exactly(library_root: Path, material_id: str) -> bool:
