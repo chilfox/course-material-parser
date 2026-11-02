@@ -61,6 +61,23 @@ def test_furniture_without_a_source_page_does_not_fail_the_parse(run_parse, conv
     assert _start(run_parse).exit_code == 0
 
 
+@pytest.mark.parametrize("failure", ["failed", "partial", "missing provenance"])
+def test_a_failed_material_holds_only_the_source_pdf_and_its_record(
+    run_parse, converter, library, failure
+):
+    if failure == "missing provenance":
+        converter.document.add_text(label=DocItemLabel.TEXT, text="Floating text.")
+    else:
+        converter.failure = "page 2 timed out"
+        converter.partial = failure == "partial"
+
+    assert_error(_start(run_parse), "conversion_failed")
+
+    material = library / "ml" / "deck"
+    assert sorted(p.name for p in material.iterdir()) == ["material.json", "source.pdf"]
+    assert _status(library) == "failed"
+
+
 @pytest.mark.parametrize(
     "command", [["get", "--source", "ml/deck"], ["toc", "--source", "ml/deck"]]
 )
