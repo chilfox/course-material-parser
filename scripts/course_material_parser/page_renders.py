@@ -55,7 +55,7 @@ def render(material: Material, pages: list[int]) -> Renders:
                 # Overlapping sessions may render the same page at once; each replaces
                 # the file whole, so no reader sees a half-written PNG and no lock is needed.
                 write_atomically(render_dir / _file(page), png)
-        except pdf.RenderFailed as error:
+        except pdf.PdfError as error:
             raise CliError(
                 "render_failed",
                 f"could not render {material.material_id}: {error}; its source.pdf may be "
