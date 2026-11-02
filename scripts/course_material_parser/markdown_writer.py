@@ -22,6 +22,7 @@ from docling_core.transforms.serializer.markdown import MarkdownDocSerializer
 from docling_core.types.doc import ContentLayer, DocItem, DoclingDocument, NodeItem, PictureItem
 
 from course_material_parser.page_blocks import join_page_blocks, page_block
+from course_material_parser.provenance import source_pages
 
 _VISUAL_MARKER = "<visual>"
 
@@ -75,7 +76,7 @@ def write_markdown(doc: DoclingDocument, selector: Selector) -> str:
 
 def _pages(doc: DoclingDocument, node: NodeItem) -> set[int]:
     """Return every source page in the provenance of ``node`` and its descendants."""
-    return {prov.page_no for item in _doc_items(doc, node) for prov in item.prov}
+    return set().union(*(source_pages(item) for item in _doc_items(doc, node)))
 
 
 def _doc_items(doc: DoclingDocument, node: NodeItem) -> Iterator[DocItem]:

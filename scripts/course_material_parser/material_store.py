@@ -11,6 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import assert_never
 
 from course_material_parser.atomic_write import write_atomically
 from course_material_parser.cli_output import CliError
@@ -20,6 +21,7 @@ _METADATA_FILE = "material.json"
 _SOURCE_PDF = "source.pdf"
 _CONTENTS_DIR = "contents"
 _SLIDES_FILE = "slides.md"
+_EXTRACTION_FILE = "extraction.json"
 # One folder name: letters, digits, ".", "_", "-", not starting with "." (so ".", "..",
 # and hidden folders, which discovery skips, are impossible).
 _SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
@@ -29,6 +31,7 @@ class MaterialType(StrEnum):
     """The kind of source PDF a material was parsed from."""
 
     SLIDES = "slides"
+    TEXTBOOK = "textbook"
 
 
 class Status(StrEnum):
@@ -41,12 +44,17 @@ class Status(StrEnum):
 
 @dataclass(frozen=True)
 class MaterialRecord:
-    """The contents of ``material.json``."""
+    """The contents of ``material.json``.
+
+    ``extraction_id`` identifies the stored extraction of a pending textbook, so a split
+    plan written for one extraction can't be applied to another; it is ``None`` otherwise.
+    """
 
     type: MaterialType
     status: Status
     source_filename: str
     pages: int
+    extraction_id: str | None = None
     format_version: int = FORMAT_VERSION
 
 
@@ -67,6 +75,11 @@ def source_pdf(material_dir: Path) -> Path:
 def slides_markdown(material_dir: Path) -> Path:
     """Return where a slide deck's Markdown lives."""
     return material_dir / _CONTENTS_DIR / _SLIDES_FILE
+
+
+def extraction_json(material_dir: Path) -> Path:
+    """Return where a pending textbook's stored DoclingDocument JSON lives."""
+    return material_dir / _EXTRACTION_FILE
 
 
 def check_destination(library_root: Path, material_id: str) -> Path:
@@ -97,9 +110,7 @@ def check_destination(library_root: Path, material_id: str) -> Path:
             raise _invalid_destination(material_id, f"{ancestor} exists and is not a folder")
         if (ancestor_path / _METADATA_FILE).exists():
             raise _invalid_destination(material_id, f"it is inside material {ancestor}")
-        # A crash between creating the folder and copying the PDF leaves it empty, which
-        # looks like any other parent folder, so that interrupted parse can't be detected.
-        if (ancestor_path / _SOURCE_PDF).exists() or (ancestor_path / _CONTENTS_DIR).exists():
+        if _looks_interrupted(ancestor_path):
             raise _invalid_destination(
                 material_id,
                 f"it is inside {ancestor}, which looks like an interrupted parse",
@@ -109,6 +120,13 @@ def check_destination(library_root: Path, material_id: str) -> Path:
     if path.exists() or path.is_symlink():
         raise _destination_exists(material_id)
     return path
+
+
+def _looks_interrupted(path: Path) -> bool:
+    """Return whether ``path`` holds a parse's files; callers have ruled out ``material.json``."""
+    # A crash between creating the folder and copying the PDF leaves it empty, which
+    # looks like any other parent folder, so that interrupted parse can't be detected.
+    return (path / _SOURCE_PDF).exists() or (path / _CONTENTS_DIR).exists()
 
 
 def _is_well_formed(material_id: str) -> bool:
@@ -225,13 +243,58 @@ def get_ready_material(library_root: Path, material_id: str) -> Material:
         CliError: ``not_found`` when no material has that id, naming its status when
             it exists but isn't ready.
     """
-    path = library_root / material_id
-    if not (_exists_exactly(library_root, material_id) and (path / _METADATA_FILE).is_file()):
+    material = _find_material(library_root, material_id)
+    if material is None:
         raise CliError("not_found", f"no ready material '{material_id}'")
-    material = _load(library_root, path)
     if material.record.status is not Status.READY:
         raise CliError("not_found", f"{material_id} is not ready ({material.record.status})")
     return material
+
+
+def get_pending_material(library_root: Path, material_id: str) -> Material:
+    """Return the pending textbook with exactly the id ``material_id``, awaiting its split.
+
+    The id is matched as strictly as in ``get_ready_material``.
+
+    Raises:
+        CliError: ``not_found`` when no material has that id, saying how to fix it when
+            the folder is an interrupted parse or the material is ready or failed.
+    """
+    material = _find_material(library_root, material_id)
+    if material is None:
+        if _exists_exactly(library_root, material_id) and _looks_interrupted(
+            library_root / material_id
+        ):
+            raise CliError(
+                "not_found",
+                f"{material_id} is an interrupted parse; delete that folder by hand or parse "
+                "into a new destination",
+            )
+        raise CliError(
+            "not_found", f"no material '{material_id}'; parse it first with `parse start`"
+        )
+    match material.record.status:
+        case Status.PENDING:
+            return material
+        case Status.READY:
+            fix = "it is ready; read it with `read`"
+        case Status.FAILED:
+            fix = "its parse failed; parse again into a new destination"
+        case unhandled:
+            assert_never(unhandled)
+    raise CliError("not_found", f"{material_id} is not pending ({material.record.status}): {fix}")
+
+
+def _find_material(library_root: Path, material_id: str) -> Material | None:
+    """Return the material with exactly the id ``material_id``, whatever its status.
+
+    Returns ``None`` when no folder has that exact id or it holds no ``material.json``
+    (an interrupted parse). Matching is as strict as in ``get_ready_material``.
+    """
+    path = library_root / material_id
+    if not (_exists_exactly(library_root, material_id) and (path / _METADATA_FILE).is_file()):
+        return None
+    return _load(library_root, path)
 
 
 def _exists_exactly(library_root: Path, material_id: str) -> bool:
