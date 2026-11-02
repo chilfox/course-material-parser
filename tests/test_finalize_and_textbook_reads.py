@@ -1,7 +1,7 @@
 """CLI seam: an approved split is finalized into a ready textbook read unit by unit."""
 
 import json
-import os
+from pathlib import Path
 
 import pytest
 
@@ -140,19 +140,23 @@ def test_finalize_without_confirm_is_refused_even_before_any_proposal(run_parse,
     assert_error(run_parse("finalize", "--dest", DEST), "confirm_required", "--confirm")
 
 
-# Root ignores permission bits, so a read-only folder can't make finalize fail there.
-@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores folder permissions")
-def test_a_finalize_that_cannot_write_leaves_the_textbook_pending_and_can_be_rerun(
-    run_parse, run_read, library, plan_file
+def test_a_finalize_that_fails_writing_units_leaves_the_textbook_pending_and_can_be_rerun(
+    run_parse, run_read, library, plan_file, monkeypatch
 ):
-    folder = library / DEST
-    folder.chmod(0o555)
-    try:
-        assert_error(finalize(run_parse), "internal_error", "PermissionError")
-    finally:
-        folder.chmod(0o755)
+    real_write_text = Path.write_text
 
+    def disk_full_on_third_unit(path, *args, **kwargs):
+        if path.name == "section_1-2.md":
+            raise OSError("No space left on device")
+        return real_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", disk_full_on_third_unit)
+    assert_error(finalize(run_parse), "internal_error", "No space left on device")
+    monkeypatch.undo()
+
+    assert (library / DEST / "contents" / "chapter-01" / "1-intro.md").exists()
     assert material_status(library, DEST) == "pending"
+    assert {"extraction.json", "plan.json"} <= set(stored_files(library))
     assert_error(run_read("toc", "--source", DEST), "not_found", "not ready (pending)")
     assert finalize(run_parse).exit_code == 0
 
