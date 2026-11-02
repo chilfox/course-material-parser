@@ -15,7 +15,7 @@ _Avoid_: printed page, page label
 The readable representation of a source PDF, including its text, structure, and references to visual content.
 
 **Split plan**:
-A proposed organization of a textbook's content into chapters and sections for separate reading.
+A proposed organization of a textbook's content into chapters and reading units for separate reading, by source-page range. Its units nest under their chapters in reading order, and it names the extraction it was written for. Proposing it saves a snapshot, which is what the user approves.
 
 **Extraction**:
 The stored result of converting a textbook once, kept while the textbook is pending so its split can be planned and applied without converting again. Its extraction id ties a split plan to exactly this extraction.
@@ -42,7 +42,7 @@ The identity of one parsed material: its destination path relative to the librar
 An identifier, unique within one parsed material, that names a chapter or reading unit for reading.
 
 **Boundary-page overlap**:
-Intentional inclusion of the same source-PDF page in adjacent textbook reading units when their boundary falls within that page.
+Intentional inclusion of the same source-PDF page in adjacent textbook reading units when their boundary falls within that page. Adjacent units share at most that one page; several units may lie on it.
 
 **Page render**:
 An image of one source page of a parsed material, produced on request and kept until the user asks for it to be cleared.

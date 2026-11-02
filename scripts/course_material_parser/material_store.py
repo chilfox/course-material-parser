@@ -22,6 +22,7 @@ _SOURCE_PDF = "source.pdf"
 _CONTENTS_DIR = "contents"
 _SLIDES_FILE = "slides.md"
 _EXTRACTION_FILE = "extraction.json"
+_PLAN_FILE = "plan.json"
 # One folder name: letters, digits, ".", "_", "-", not starting with "." (so ".", "..",
 # and hidden folders, which discovery skips, are impossible).
 _SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
@@ -80,6 +81,11 @@ def slides_markdown(material_dir: Path) -> Path:
 def extraction_json(material_dir: Path) -> Path:
     """Return where a pending textbook's stored DoclingDocument JSON lives."""
     return material_dir / _EXTRACTION_FILE
+
+
+def plan_snapshot(material_dir: Path) -> Path:
+    """Return where a pending textbook's proposed split plan snapshot lives."""
+    return material_dir / _PLAN_FILE
 
 
 def check_destination(library_root: Path, material_id: str) -> Path:
@@ -188,6 +194,12 @@ def write_slides(material_dir: Path, markdown: str) -> None:
     path = slides_markdown(material_dir)
     path.parent.mkdir()
     path.write_text(markdown, encoding="utf-8")
+
+
+def write_plan_snapshot(material_dir: Path, plan: dict) -> None:
+    """Replace the pending textbook's split plan snapshot atomically with ``plan``."""
+    payload = json.dumps(plan, indent=2, ensure_ascii=False) + "\n"
+    write_atomically(plan_snapshot(material_dir), payload.encode("utf-8"))
 
 
 def write_record(material_dir: Path, record: MaterialRecord) -> None:
