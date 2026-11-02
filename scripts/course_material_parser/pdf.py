@@ -36,8 +36,11 @@ def _opened(pdf: Path) -> Iterator[pypdfium2.PdfDocument]:
         document = pypdfium2.PdfDocument(pdf)
     except pypdfium2.PdfiumError as error:
         raise PdfError(f"not a readable PDF: {pdf} ({error})") from None
+    except FileNotFoundError:
+        raise PdfError(f"{pdf} not found") from None
     except OSError as error:
-        raise PdfError(f"can't read {pdf} ({error.strerror})") from None
+        # pypdfium2 raises some OSErrors with only the path, so strerror can be None.
+        raise PdfError(f"can't read {pdf} ({error.strerror or type(error).__name__})") from None
     try:
         yield document
     finally:
