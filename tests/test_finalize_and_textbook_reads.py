@@ -1,6 +1,7 @@
 """CLI seam: an approved split is finalized into a ready textbook read unit by unit."""
 
 import json
+import os
 
 import pytest
 
@@ -139,6 +140,8 @@ def test_finalize_without_confirm_is_refused_even_before_any_proposal(run_parse,
     assert_error(run_parse("finalize", "--dest", DEST), "confirm_required", "--confirm")
 
 
+# Root ignores permission bits, so a read-only folder can't make finalize fail there.
+@pytest.mark.skipif(os.geteuid() == 0, reason="root ignores folder permissions")
 def test_a_finalize_that_cannot_write_leaves_the_textbook_pending_and_can_be_rerun(
     run_parse, run_read, library, plan_file
 ):
@@ -164,7 +167,9 @@ def test_finalize_replaces_contents_left_by_an_interrupted_finalize(run_parse, l
     assert not leftover.exists()
 
 
-def test_a_record_from_before_finalize_existed_is_still_readable(run_parse, run_read, library):
+def test_a_slides_record_from_before_finalize_existed_is_still_readable(
+    run_parse, run_read, library
+):
     parse_slides(run_parse)
     path = record_path(library, "ml/week3-slides")
     record = json.loads(path.read_text())
