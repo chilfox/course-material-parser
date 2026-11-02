@@ -137,26 +137,27 @@ def test_an_invalid_plan_reports_every_problem_at_once_and_changes_nothing(
     assert snapshot(library) == approved
 
 
+def _parent(plan, path):
+    """Return the container holding the plan field at ``path`` (keys and indexes)."""
+    for key in path[:-1]:
+        plan = plan[key]
+    return plan
+
+
 def _set(path, value):
-    """Return an edit that sets the plan field at ``path`` (keys and indexes) to ``value``."""
+    """Return an edit that sets the plan field at ``path`` to ``value``."""
 
     def edit(plan):
-        *parents, last = path
-        target = plan
-        for key in parents:
-            target = target[key]
-        target[last] = value
+        _parent(plan, path)[path[-1]] = value
 
     return edit
 
 
 def _delete(path):
+    """Return an edit that removes the plan field at ``path``."""
+
     def edit(plan):
-        *parents, last = path
-        target = plan
-        for key in parents:
-            target = target[key]
-        del target[last]
+        del _parent(plan, path)[path[-1]]
 
     return edit
 
@@ -178,6 +179,8 @@ SECTION_2 = (*CHAPTER, "units", 1)
         (_set((*SECTION_1, "id"), "-1"), "invalid id '-1'"),
         (_set((*SECTION_2, "id"), "chapter-01"), "duplicate id 'chapter-01'"),
         (_set((*SECTION_1, "title"), " "), "unit 1-1: empty title"),
+        (_set((*SECTION_1, "title"), 42), "unit 1-1: title is not a string"),
+        (_set(("version",), 1.0), "version 1.0 is not supported: use 1"),
         (
             _set((*SECTION_1, "kind"), "exercise"),
             "unit 1-1: kind 'exercise' is not section or other",
@@ -278,3 +281,19 @@ def test_propose_help_documents_the_plan_file_and_its_rules(run_parse):
     for fragment in ('"extraction_id"', '"units"', '"pdf_pages"', "boundary page"):
         assert fragment in result.stdout
     assert "propose" in run_parse("--help").stdout
+
+
+def test_a_bad_title_or_kind_does_not_hide_page_problems(run_parse, tmp_path, extraction_id):
+    plan = valid_plan(extraction_id)
+    plan["contents"][0]["title"] = ""
+    plan["contents"][1]["units"][0]["kind"] = "exercise"
+    plan["contents"][1]["units"][1]["selector"].update(start=3, end=6)
+
+    result = propose(run_parse, tmp_path, plan)
+
+    assert result.error["problems"] == [
+        "unit front-matter: empty title",
+        "unit 1-1: kind 'exercise' is not section or other",
+        "unit 1-2: pages 3-6 overlap unit 1-1 (pages 2-4) by more than one boundary page",
+        "pages 7-8 are in no unit",
+    ]
