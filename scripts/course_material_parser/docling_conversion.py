@@ -3,6 +3,8 @@
 ``DoclingConverter`` turns a source PDF into a DoclingDocument with formula enrichment on,
 and reports success, failure, and partial conversion as distinct outcomes. Entry points
 accept any object with the same ``convert`` method, so tests inject a fake.
+``save_document`` and ``load_document`` store a converted document as DoclingDocument JSON
+and load it back, so a textbook is split later without converting again.
 """
 
 import os
