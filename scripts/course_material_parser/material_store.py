@@ -11,6 +11,7 @@ import re
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import assert_never
 
 from course_material_parser.atomic_write import write_atomically
 from course_material_parser.cli_output import CliError
@@ -127,13 +128,6 @@ def _looks_interrupted(path: Path) -> bool:
     # looks like any other parent folder, so that interrupted parse can't be detected.
     has_parse_files = (path / _SOURCE_PDF).exists() or (path / _CONTENTS_DIR).exists()
     return has_parse_files and not (path / _METADATA_FILE).exists()
-
-
-def is_interrupted_parse(library_root: Path, material_id: str) -> bool:
-    """Return whether ``material_id`` names exactly a folder left by an interrupted parse."""
-    return _exists_exactly(library_root, material_id) and _looks_interrupted(
-        library_root / material_id
-    )
 
 
 def _is_well_formed(material_id: str) -> bool:
@@ -256,6 +250,40 @@ def get_ready_material(library_root: Path, material_id: str) -> Material:
     if material.record.status is not Status.READY:
         raise CliError("not_found", f"{material_id} is not ready ({material.record.status})")
     return material
+
+
+def get_pending_material(library_root: Path, material_id: str) -> Material:
+    """Return the pending textbook with exactly the id ``material_id``, awaiting its split.
+
+    The id is matched as strictly as in ``get_ready_material``.
+
+    Raises:
+        CliError: ``not_found`` when no material has that id, saying how to fix it when
+            the folder is an interrupted parse or the material is ready or failed.
+    """
+    material = find_material(library_root, material_id)
+    if material is None:
+        if _exists_exactly(library_root, material_id) and _looks_interrupted(
+            library_root / material_id
+        ):
+            raise CliError(
+                "not_found",
+                f"{material_id} is an interrupted parse; delete that folder by hand or parse "
+                "into a new destination",
+            )
+        raise CliError(
+            "not_found", f"no material '{material_id}'; parse it first with `parse start`"
+        )
+    match material.record.status:
+        case Status.PENDING:
+            return material
+        case Status.READY:
+            fix = "it is ready; read it with `read`"
+        case Status.FAILED:
+            fix = "its parse failed; parse again into a new destination"
+        case unhandled:
+            assert_never(unhandled)
+    raise CliError("not_found", f"{material_id} is not pending ({material.record.status}): {fix}")
 
 
 def find_material(library_root: Path, material_id: str) -> Material | None:
