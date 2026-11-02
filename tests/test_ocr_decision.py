@@ -2,26 +2,21 @@
 
 import pytest
 
-from conftest import IMAGE_ONLY_PDF, TEXT_LAYER_PDF, assert_error
+from conftest import IMAGE_ONLY_PDF, TEXT_LAYER_PDF, assert_error, start_parse, write_settings
 
 
-def start(run_parse, pdf, *flags):
-    return run_parse("start", "--pdf", str(pdf), "--dest", "ml/deck", "--type", "slides", *flags)
-
-
-def allow_ocr(settings_path, allowed: bool) -> None:
-    settings_path.write_text(
-        settings_path.read_text() + f"allow_ocr = {'true' if allowed else 'false'}\n"
-    )
+def allow_ocr(settings_path, library, allowed: bool) -> None:
+    """Rewrite the settings file with ``allow_ocr`` set to ``allowed``."""
+    write_settings(settings_path, library, f"allow_ocr = {'true' if allowed else 'false'}\n")
 
 
 @pytest.mark.parametrize("allowed", [True, False])
 def test_a_scanned_pdf_without_an_ocr_flag_is_refused_with_the_page_count(
     run_parse, settings_path, library, converter, allowed
 ):
-    allow_ocr(settings_path, allowed)
+    allow_ocr(settings_path, library, allowed)
 
-    result = start(run_parse, IMAGE_ONLY_PDF)
+    result = start_parse(run_parse, pdf=IMAGE_ONLY_PDF)
 
     assert_error(result, "ocr_required", "1 of 1 pages have no text layer; this looks scanned")
     assert ("disabled" in result.error["message"]) is not allowed
@@ -41,21 +36,21 @@ def test_a_scanned_pdf_without_an_ocr_flag_is_refused_with_the_page_count(
     ],
 )
 def test_parsing_without_ocr_converts_without_it(
-    run_parse, settings_path, converter, allowed, pdf, flags, expected_ocr
+    run_parse, settings_path, library, converter, allowed, pdf, flags, expected_ocr
 ):
-    allow_ocr(settings_path, allowed)
+    allow_ocr(settings_path, library, allowed)
 
-    result = start(run_parse, pdf, *flags)
+    result = start_parse(run_parse, *flags, pdf=pdf)
 
     assert result.exit_code == 0, result.stderr
     assert converter.calls == [{"ocr": expected_ocr}]
 
 
 @pytest.mark.parametrize("pdf", [TEXT_LAYER_PDF, IMAGE_ONLY_PDF])
-def test_ocr_flag_converts_with_ocr_when_allowed(run_parse, settings_path, converter, pdf):
-    allow_ocr(settings_path, True)
+def test_ocr_flag_converts_with_ocr_when_allowed(run_parse, settings_path, library, converter, pdf):
+    allow_ocr(settings_path, library, True)
 
-    result = start(run_parse, pdf, "--ocr")
+    result = start_parse(run_parse, "--ocr", pdf=pdf)
 
     assert result.exit_code == 0, result.stderr
     assert converter.calls == [{"ocr": True}]
@@ -65,9 +60,9 @@ def test_ocr_flag_converts_with_ocr_when_allowed(run_parse, settings_path, conve
 def test_ocr_flag_is_refused_before_the_destination_exists_when_ocr_is_disabled(
     run_parse, settings_path, library, converter, pdf
 ):
-    allow_ocr(settings_path, False)
+    allow_ocr(settings_path, library, False)
 
-    result = start(run_parse, pdf, "--ocr")
+    result = start_parse(run_parse, "--ocr", pdf=pdf)
 
     assert_error(result, "ocr_disabled", "allow_ocr = false")
     assert converter.calls == []
@@ -75,7 +70,7 @@ def test_ocr_flag_is_refused_before_the_destination_exists_when_ocr_is_disabled(
 
 
 def test_ocr_and_no_ocr_are_mutually_exclusive(run_parse, library, converter):
-    result = start(run_parse, TEXT_LAYER_PDF, "--ocr", "--no-ocr")
+    result = start_parse(run_parse, "--ocr", "--no-ocr", pdf=TEXT_LAYER_PDF)
 
     assert_error(result, "invalid_request", "--no-ocr", "--ocr")
     assert converter.calls == []

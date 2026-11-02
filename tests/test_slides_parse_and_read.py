@@ -1,20 +1,16 @@
 """CLI seam: a slide deck is parsed into ready material and read back."""
 
-import json
-
-from conftest import TEXT_LAYER_PDF, parse_slides
+from conftest import TEXT_LAYER_PDF, material_status, parse_slides, start_parse
 
 
 def test_parsing_slides_stores_a_ready_material_with_page_marked_markdown(run_parse, library):
-    result = run_parse(
-        "start", "--pdf", str(TEXT_LAYER_PDF), "--dest", "ml/week3-slides", "--type", "slides"
-    )
+    result = start_parse(run_parse, dest="ml/week3-slides")
 
     assert result.exit_code == 0, result.stderr
     assert result.stderr == ""
     material = library / "ml" / "week3-slides"
     assert (material / "source.pdf").read_bytes() == TEXT_LAYER_PDF.read_bytes()
-    assert json.loads((material / "material.json").read_text())["status"] == "ready"
+    assert material_status(library, "ml/week3-slides") == "ready"
     slides = (material / "contents" / "slides.md").read_text()
     assert slides.index("<page 1>") < slides.index("Slide one body.")
     assert slides.index("<page 2>") < slides.index("Slide two body.")

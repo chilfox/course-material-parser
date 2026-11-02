@@ -74,7 +74,7 @@ def library(tmp_path) -> Path:
 def settings_path(tmp_path, library) -> Path:
     path = tmp_path / "skill" / "settings.toml"
     path.parent.mkdir()
-    path.write_text(f'library_root = "{library}"\ndevice = "cpu"\n')
+    write_settings(path, library)
     return path
 
 
@@ -98,10 +98,42 @@ def assert_error(result: CliResult, code: str, *fragments: str) -> None:
         assert fragment in result.error["message"]
 
 
+def write_settings(settings_path: Path, library_root, extra: str = "", *, device="cpu") -> None:
+    """Write a settings file with ``library_root``, ``device``, and any ``extra`` TOML lines."""
+    settings_path.write_text(f'library_root = "{library_root}"\ndevice = "{device}"\n{extra}')
+
+
+def start_parse(
+    run_parse,
+    *flags: str,
+    dest: str = "ml/deck",
+    pdf: Path | str = TEXT_LAYER_PDF,
+    material_type: str = "slides",
+) -> CliResult:
+    """Run ``parse start`` for ``pdf`` into ``dest`` with any extra ``flags``."""
+    return run_parse("start", "--pdf", str(pdf), "--dest", dest, "--type", material_type, *flags)
+
+
 def parse_slides(run_parse, dest: str = "ml/week3-slides") -> None:
     """Parse the text-layer fixture as slides into ``dest`` and assert it succeeded."""
-    result = run_parse("start", "--pdf", str(TEXT_LAYER_PDF), "--dest", dest, "--type", "slides")
+    result = start_parse(run_parse, dest=dest)
     assert result.exit_code == 0, result.stderr
+
+
+def record_path(library: Path, dest: str) -> Path:
+    """Return the ``material.json`` of the material at ``dest``."""
+    return library / dest / "material.json"
+
+
+def material_status(library: Path, dest: str = "ml/deck") -> str:
+    """Return the status stored in the ``material.json`` of ``dest``."""
+    return json.loads(record_path(library, dest).read_text())["status"]
+
+
+def set_material_status(library: Path, dest: str, status: str) -> None:
+    """Overwrite the status in the ``material.json`` of ``dest``, keeping the rest."""
+    path = record_path(library, dest)
+    path.write_text(json.dumps({**json.loads(path.read_text()), "status": status}))
 
 
 def _runner(capsys, main):
