@@ -73,6 +73,9 @@ def test_an_unrenderable_source_fails_with_render_failed(run_parse, run_read, li
     result = run_read("render", "--source", "ml/week3-slides", "--pages", "1")
 
     assert_error(result, "render_failed", "ml/week3-slides", "source.pdf")
+    reason = {"corrupt": "not a readable PDF", "missing": "not found"}[damage]
+    assert reason in result.error["message"]
+    assert "None" not in result.error["message"]
 
 
 def test_renders_are_only_for_ready_material(run_parse, run_read, converter):
