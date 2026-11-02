@@ -6,7 +6,7 @@ copy, conversion, stored output) that branches on the type only when writing con
 
 import argparse
 import shutil
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from course_material_parser import material_store, pdf
@@ -120,7 +120,7 @@ def _check_ocr_choice(source: Path, ocr: bool | None, settings: Settings) -> Non
         )
     if ocr is not None:
         return
-    layer = pdf.text_layer(source)
+    layer = _read_pdf(pdf.text_layer, source)
     if not layer.looks_scanned:
         return
     message = (
@@ -136,6 +136,18 @@ def _check_ocr_choice(source: Path, ocr: bool | None, settings: Settings) -> Non
     raise CliError("ocr_required", message)
 
 
+def _read_pdf[T](read: Callable[[Path], T], source: Path) -> T:
+    """Return ``read(source)``, refusing a source PDF that can't be read.
+
+    Raises:
+        CliError: ``invalid_request`` when ``source`` isn't a readable PDF.
+    """
+    try:
+        return read(source)
+    except pdf.PdfError as error:
+        raise CliError("invalid_request", str(error)) from None
+
+
 def _start(args: argparse.Namespace, settings: Settings, converter: Converter | None) -> dict:
     # Only start converts, so only it checks the device: that imports torch, which the
     # other subcommands never need.
@@ -149,7 +161,7 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
     source: Path = args.pdf
     if not source.is_file():
         raise CliError("not_found", f"PDF not found: {source}")
-    pages = pdf.page_count(source)
+    pages = _read_pdf(pdf.page_count, source)
     _check_ocr_choice(source, args.ocr, settings)
 
     material_type = MaterialType(args.type)
