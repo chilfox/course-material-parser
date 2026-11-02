@@ -207,6 +207,11 @@ def ready_materials(library_root: Path, prefix: str | None = None) -> list[Mater
 
 
 def _has_prefix(material_id: str, prefix: str | None) -> bool:
+    """Return whether ``material_id`` lies under ``prefix``, matching whole path segments.
+
+    ``None`` matches every id; otherwise the id must equal ``prefix`` or start with
+    ``prefix/``, so ``ml`` matches ``ml`` and ``ml/prml`` but not ``mlx/a``.
+    """
     return prefix is None or material_id == prefix or material_id.startswith(prefix + "/")
 
 
