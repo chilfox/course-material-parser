@@ -220,25 +220,52 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
             material_store.write_slides(
                 destination, write_markdown(outcome.document, PdfPages(start=1, end=pages))
             )
-            status, extraction_id = Status.READY, None
+            _record(destination, material_type, Status.READY, source.name, pages)
+            return {
+                "source": args.dest,
+                "type": material_type,
+                "status": Status.READY,
+                "pages": pages,
+            }
         case MaterialType.TEXTBOOK:
             extraction_path = material_store.extraction_json(destination)
             save_document(outcome.document, extraction_path)
-            status, extraction_id = Status.PENDING, extraction.extraction_id(extraction_path)
+            record = _record(
+                destination,
+                material_type,
+                Status.PENDING,
+                source.name,
+                pages,
+                extraction_id=extraction.extraction_id(extraction_path),
+            )
+            return _structure_index(Material(args.dest, destination, record), outcome.document)
         case unhandled:
             assert_never(unhandled)
+
+
+def _record(
+    destination: Path,
+    material_type: MaterialType,
+    status: Status,
+    source_filename: str,
+    pages: int,
+    *,
+    extraction_id: str | None = None,
+) -> MaterialRecord:
+    """Write the material's record at ``destination`` and return it.
+
+    Every outcome of a parse (ready, pending, or failed) ends here, after everything the
+    status promises exists, so a material only ever shows a status it can honour.
+    """
     record = MaterialRecord(
         type=material_type,
         status=status,
-        source_filename=source.name,
+        source_filename=source_filename,
         pages=pages,
         extraction_id=extraction_id,
     )
-    # Written last, so a material only ever shows a status once everything it needs exists.
     material_store.write_record(destination, record)
-    if material_type is MaterialType.TEXTBOOK:
-        return _structure_index(Material(args.dest, destination, record), outcome.document)
-    return {"source": args.dest, "type": material_type, "status": status, "pages": pages}
+    return record
 
 
 def _structure_index(material: Material, document: DoclingDocument) -> dict:
@@ -255,7 +282,7 @@ def _structure_index(material: Material, document: DoclingDocument) -> dict:
 
 
 def _inspect(settings: Settings, material_id: str, pages: str | None) -> dict:
-    material = _pending_material(settings, material_id)
+    material = material_store.get_pending_material(settings.library_root, material_id)
     document = load_document(material_store.extraction_json(material.path))
     if pages is None:
         return _structure_index(material, document)
@@ -265,36 +292,6 @@ def _inspect(settings: Settings, material_id: str, pages: str | None) -> dict:
         "extraction_id": material.record.extraction_id,
         "items": extraction.page_items(document, set(selected)),
     }
-
-
-def _pending_material(settings: Settings, material_id: str) -> Material:
-    """Return the pending textbook ``material_id``, awaiting its split.
-
-    Raises:
-        CliError: ``not_found`` when there is no such material, naming its status when it
-            exists but isn't pending.
-    """
-    material = material_store.find_material(settings.library_root, material_id)
-    if material is None and material_store.is_interrupted_parse(settings.library_root, material_id):
-        raise CliError(
-            "not_found",
-            f"{material_id} is an interrupted parse; delete that folder by hand or parse "
-            "into a new destination",
-        )
-    if material is None:
-        raise CliError(
-            "not_found", f"no material '{material_id}'; parse it first with `parse start`"
-        )
-    match material.record.status:
-        case Status.PENDING:
-            return material
-        case Status.READY:
-            fix = "it is ready; read it with `read`"
-        case Status.FAILED:
-            fix = "its parse failed; parse again into a new destination"
-        case unhandled:
-            assert_never(unhandled)
-    raise CliError("not_found", f"{material_id} is not pending ({material.record.status}): {fix}")
 
 
 def _conversion_problem(outcome: ConversionOutcome) -> str | None:
@@ -318,7 +315,4 @@ def _mark_failed(
     Shared by every material type. It runs before any contents are written, so the folder
     is left holding only the retained source PDF and this record.
     """
-    record = MaterialRecord(
-        type=material_type, status=Status.FAILED, source_filename=source_filename, pages=pages
-    )
-    material_store.write_record(destination, record)
+    _record(destination, material_type, Status.FAILED, source_filename, pages)
