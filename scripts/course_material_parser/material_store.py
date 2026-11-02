@@ -123,11 +123,10 @@ def check_destination(library_root: Path, material_id: str) -> Path:
 
 
 def _looks_interrupted(path: Path) -> bool:
-    """Return whether the folder ``path`` holds a parse's files but no ``material.json``."""
+    """Return whether ``path`` holds a parse's files; callers have ruled out ``material.json``."""
     # A crash between creating the folder and copying the PDF leaves it empty, which
     # looks like any other parent folder, so that interrupted parse can't be detected.
-    has_parse_files = (path / _SOURCE_PDF).exists() or (path / _CONTENTS_DIR).exists()
-    return has_parse_files and not (path / _METADATA_FILE).exists()
+    return (path / _SOURCE_PDF).exists() or (path / _CONTENTS_DIR).exists()
 
 
 def _is_well_formed(material_id: str) -> bool:
@@ -244,7 +243,7 @@ def get_ready_material(library_root: Path, material_id: str) -> Material:
         CliError: ``not_found`` when no material has that id, naming its status when
             it exists but isn't ready.
     """
-    material = find_material(library_root, material_id)
+    material = _find_material(library_root, material_id)
     if material is None:
         raise CliError("not_found", f"no ready material '{material_id}'")
     if material.record.status is not Status.READY:
@@ -261,7 +260,7 @@ def get_pending_material(library_root: Path, material_id: str) -> Material:
         CliError: ``not_found`` when no material has that id, saying how to fix it when
             the folder is an interrupted parse or the material is ready or failed.
     """
-    material = find_material(library_root, material_id)
+    material = _find_material(library_root, material_id)
     if material is None:
         if _exists_exactly(library_root, material_id) and _looks_interrupted(
             library_root / material_id
@@ -286,7 +285,7 @@ def get_pending_material(library_root: Path, material_id: str) -> Material:
     raise CliError("not_found", f"{material_id} is not pending ({material.record.status}): {fix}")
 
 
-def find_material(library_root: Path, material_id: str) -> Material | None:
+def _find_material(library_root: Path, material_id: str) -> Material | None:
     """Return the material with exactly the id ``material_id``, whatever its status.
 
     Returns ``None`` when no folder has that exact id or it holds no ``material.json``
