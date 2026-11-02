@@ -223,29 +223,36 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
             record = MaterialRecord(
                 type=material_type, status=Status.READY, source_filename=source.name, pages=pages
             )
+            # Written last, so a material is only ever ready once all its contents exist.
+            material_store.write_record(destination, record)
+            return {
+                "source": args.dest,
+                "type": material_type,
+                "status": Status.READY,
+                "pages": pages,
+            }
         case MaterialType.TEXTBOOK:
-            stored = material_store.extraction_json(destination)
-            save_document(outcome.document, stored)
+            extraction_path = material_store.extraction_json(destination)
+            save_document(outcome.document, extraction_path)
             record = MaterialRecord(
                 type=material_type,
                 status=Status.PENDING,
                 source_filename=source.name,
                 pages=pages,
-                extraction_id=extraction.extraction_id(stored),
+                extraction_id=extraction.extraction_id(extraction_path),
             )
+            # Written last, so a material is only ever pending once its extraction exists.
+            material_store.write_record(destination, record)
+            return _structure_index(Material(args.dest, destination, record), outcome.document)
         case unhandled:
             assert_never(unhandled)
-    # Written last, so a material only ever shows a status once everything it needs exists.
-    material_store.write_record(destination, record)
-    if record.status is Status.PENDING:
-        return _structure_index(args.dest, record, outcome.document)
-    return {"source": args.dest, "type": material_type, "status": record.status, "pages": pages}
 
 
-def _structure_index(material_id: str, record: MaterialRecord, document: DoclingDocument) -> dict:
+def _structure_index(material: Material, document: DoclingDocument) -> dict:
     """Return the structure index of a pending textbook, as ``start`` and ``inspect`` print it."""
+    record = material.record
     return {
-        "source": material_id,
+        "source": material.material_id,
         "type": record.type,
         "status": record.status,
         "extraction_id": record.extraction_id,
@@ -258,7 +265,7 @@ def _inspect(settings: Settings, material_id: str, pages: str | None) -> dict:
     material = _pending_material(settings, material_id)
     document = load_document(material_store.extraction_json(material.path))
     if pages is None:
-        return _structure_index(material_id, material.record, document)
+        return _structure_index(material, document)
     selected = parse_pages(pages, material_id=material_id, page_count=material.record.pages)
     return {
         "source": material_id,
@@ -275,6 +282,12 @@ def _pending_material(settings: Settings, material_id: str) -> Material:
             exists but isn't pending.
     """
     material = material_store.find_material(settings.library_root, material_id)
+    if material is None and material_store.is_interrupted_parse(settings.library_root, material_id):
+        raise CliError(
+            "not_found",
+            f"{material_id} is an interrupted parse; delete that folder by hand or parse "
+            "into a new destination",
+        )
     if material is None:
         raise CliError(
             "not_found", f"no material '{material_id}'; parse it first with `parse start`"
@@ -283,7 +296,7 @@ def _pending_material(settings: Settings, material_id: str) -> Material:
         case Status.PENDING:
             return material
         case Status.READY:
-            fix = "it is already split; read it with `read`"
+            fix = "it is ready; read it with `read`"
         case Status.FAILED:
             fix = "its parse failed; parse again into a new destination"
         case unhandled:

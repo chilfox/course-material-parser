@@ -77,15 +77,17 @@ def test_inspect_pages_returns_only_items_on_those_pages_with_types_refs_and_pag
 
     assert result.exit_code == 0, result.stderr
     items = result.json["items"]
-    assert [(i["type"], i["pages"], i["text"]) for i in items] == [
+    assert [(i["type"], i["pages"], i.get("text")) for i in items] == [
         ("text", [1, 2], "A paragraph across pages."),
         ("section_header", [2], "1.2 Probability"),
         ("formula", [2], "p(x) = 1"),
         ("caption", [2], "Figure 1.1: A curve"),
-        ("picture", [2], "Figure 1.1: A curve"),
+        ("picture", [2], None),
     ]
     assert all(i["ref"].startswith("#/") for i in items)
     assert len({i["ref"] for i in items}) == len(items)
+    caption, picture = items[3], items[4]
+    assert picture["captions"] == [caption["ref"]]
     assert "Pattern Recognition" not in result.stdout
 
 
@@ -103,12 +105,26 @@ def test_inspecting_a_missing_material_says_to_parse_it_first(run_parse):
     assert_error(run_parse("inspect", "--dest", "ml/none"), "not_found", "ml/none", "parse start")
 
 
-def test_inspecting_a_ready_material_is_refused_with_its_status(run_parse):
+def test_inspecting_ready_slides_is_refused_with_their_status(run_parse):
     start_parse(run_parse, dest="ml/deck")
 
-    assert_error(
-        run_parse("inspect", "--dest", "ml/deck"), "not_found", "ml/deck is not pending (ready)"
-    )
+    result = run_parse("inspect", "--dest", "ml/deck")
+
+    assert_error(result, "not_found", "ml/deck is not pending (ready)", "read")
+    assert "split" not in result.error["message"]
+
+
+def test_inspecting_an_interrupted_parse_says_to_delete_it_or_use_a_new_destination(
+    run_parse, library
+):
+    folder = library / DEST
+    folder.mkdir(parents=True)
+    (folder / "source.pdf").write_bytes(b"%PDF")
+
+    result = run_parse("inspect", "--dest", DEST)
+
+    assert_error(result, "not_found", "interrupted", "new destination")
+    assert "parse start" not in result.error["message"]
 
 
 def test_inspecting_a_failed_textbook_is_refused_with_its_status(run_parse, converter):

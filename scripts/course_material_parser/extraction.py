@@ -14,12 +14,14 @@ from docling_core.types.doc import (
     ContentLayer,
     DocItem,
     DoclingDocument,
-    PictureItem,
+    FloatingItem,
     SectionHeaderItem,
     TableItem,
     TextItem,
     TitleItem,
 )
+
+from course_material_parser.provenance import source_pages
 
 
 def extraction_id(path: Path) -> str:
@@ -49,20 +51,26 @@ def headings(doc: DoclingDocument) -> list[dict]:
 def page_items(doc: DoclingDocument, pages: set[int]) -> list[dict]:
     """Return every body item of ``doc`` on any of ``pages``, in reading order.
 
-    Each is ``{ref, type, pages, text}``: the item's JSON reference, Docling label, every
-    source page it lies on (so an item spanning a boundary shows both sides), and its text.
-    A table's text is its Markdown, a picture's text is its caption.
+    Each is ``{ref, type, pages}``: the item's JSON reference, Docling label, and every
+    source page it lies on, so an item spanning a boundary shows both sides. Text items
+    add ``text``, and a table adds its Markdown as ``text``. A picture or table with
+    captions adds ``captions``, the refs of its caption items, which are listed on their
+    own rather than repeated.
     """
-    return [
-        {
-            "ref": item.self_ref,
-            "type": str(item.label),
-            "pages": item_pages,
-            "text": _text(doc, item),
-        }
-        for item in _body_items(doc)
-        if pages.intersection(item_pages := sorted({prov.page_no for prov in item.prov}))
-    ]
+    found = []
+    for item in _body_items(doc):
+        item_pages = sorted(source_pages(item))
+        if not pages.intersection(item_pages):
+            continue
+        entry: dict = {"ref": item.self_ref, "type": str(item.label), "pages": item_pages}
+        if isinstance(item, TableItem):
+            entry["text"] = item.export_to_markdown(doc)
+        elif isinstance(item, TextItem):
+            entry["text"] = item.text
+        if isinstance(item, FloatingItem) and item.captions:
+            entry["captions"] = [caption.cref for caption in item.captions]
+        found.append(entry)
+    return found
 
 
 def _body_items(doc: DoclingDocument) -> Iterator[DocItem]:
@@ -72,14 +80,4 @@ def _body_items(doc: DoclingDocument) -> Iterator[DocItem]:
 
 
 def _first_page(item: DocItem) -> int:
-    return min(prov.page_no for prov in item.prov)
-
-
-def _text(doc: DoclingDocument, item: DocItem) -> str:
-    if isinstance(item, TableItem):
-        return item.export_to_markdown(doc)
-    if isinstance(item, PictureItem):
-        return item.caption_text(doc)
-    if isinstance(item, TextItem):
-        return item.text
-    return ""
+    return min(source_pages(item))

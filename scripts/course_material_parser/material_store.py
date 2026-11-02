@@ -109,9 +109,7 @@ def check_destination(library_root: Path, material_id: str) -> Path:
             raise _invalid_destination(material_id, f"{ancestor} exists and is not a folder")
         if (ancestor_path / _METADATA_FILE).exists():
             raise _invalid_destination(material_id, f"it is inside material {ancestor}")
-        # A crash between creating the folder and copying the PDF leaves it empty, which
-        # looks like any other parent folder, so that interrupted parse can't be detected.
-        if (ancestor_path / _SOURCE_PDF).exists() or (ancestor_path / _CONTENTS_DIR).exists():
+        if _looks_interrupted(ancestor_path):
             raise _invalid_destination(
                 material_id,
                 f"it is inside {ancestor}, which looks like an interrupted parse",
@@ -121,6 +119,21 @@ def check_destination(library_root: Path, material_id: str) -> Path:
     if path.exists() or path.is_symlink():
         raise _destination_exists(material_id)
     return path
+
+
+def _looks_interrupted(path: Path) -> bool:
+    """Return whether the folder ``path`` holds a parse's files but no ``material.json``."""
+    # A crash between creating the folder and copying the PDF leaves it empty, which
+    # looks like any other parent folder, so that interrupted parse can't be detected.
+    has_parse_files = (path / _SOURCE_PDF).exists() or (path / _CONTENTS_DIR).exists()
+    return has_parse_files and not (path / _METADATA_FILE).exists()
+
+
+def is_interrupted_parse(library_root: Path, material_id: str) -> bool:
+    """Return whether ``material_id`` names exactly a folder left by an interrupted parse."""
+    return _exists_exactly(library_root, material_id) and _looks_interrupted(
+        library_root / material_id
+    )
 
 
 def _is_well_formed(material_id: str) -> bool:
@@ -186,8 +199,7 @@ def write_slides(material_dir: Path, markdown: str) -> None:
 
 def write_record(material_dir: Path, record: MaterialRecord) -> None:
     """Write ``material.json`` atomically, so readers never see a partial file."""
-    fields = {name: value for name, value in asdict(record).items() if value is not None}
-    payload = json.dumps(fields, indent=2) + "\n"
+    payload = json.dumps(asdict(record), indent=2) + "\n"
     write_atomically(material_dir / _METADATA_FILE, payload.encode("utf-8"))
 
 
