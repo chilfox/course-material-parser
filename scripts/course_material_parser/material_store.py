@@ -273,7 +273,7 @@ def write_textbook_units(material_dir: Path, units: Iterable[tuple[UnitRecord, s
         path.write_text(markdown, encoding="utf-8")
 
 
-def remove_intermediates(material_dir: Path) -> None:
+def remove_extraction_and_snapshot(material_dir: Path) -> None:
     """Delete a finalized textbook's stored extraction and plan snapshot."""
     extraction_json(material_dir).unlink(missing_ok=True)
     plan_snapshot(material_dir).unlink(missing_ok=True)
@@ -424,12 +424,13 @@ def _load(library_root: Path, path: Path) -> Material:
             **raw,
             "type": MaterialType(raw["type"]),
             "status": Status(raw["status"]),
-            "chapters": tuple(ChapterRecord(**chapter) for chapter in raw["chapters"]),
+            # Records written before textbooks could be finalized have no chapters or units.
+            "chapters": tuple(ChapterRecord(**chapter) for chapter in raw.get("chapters", [])),
             "units": tuple(
                 UnitRecord(
                     **{**unit, "kind": UnitKind(unit["kind"]), "pages": tuple(unit["pages"])}
                 )
-                for unit in raw["units"]
+                for unit in raw.get("units", [])
             ),
         }
     )

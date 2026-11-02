@@ -377,18 +377,18 @@ def _finalize(settings: Settings, material_id: str, *, confirm: bool) -> dict:
     material = material_store.get_pending_material(settings.library_root, material_id)
     record = material.record
     assert record.extraction_id is not None
+    if not confirm:
+        raise CliError(
+            "confirm_required",
+            "finalize splits the textbook as last proposed; re-run with --confirm only after "
+            "the user approved that proposal",
+        )
     snapshot = material_store.read_plan_snapshot(material.path)
     if snapshot is None:
         raise CliError(
             "invalid_request",
             f"{material_id} has no proposed split plan; run `parse propose` and get the "
             "user's approval first",
-        )
-    if not confirm:
-        raise CliError(
-            "confirm_required",
-            "finalize splits the textbook as last proposed; re-run with --confirm only after "
-            "the user approved that proposal",
         )
     # Validated again rather than trusted, so a snapshot that no longer fits its
     # extraction is refused instead of producing units the user never approved.
@@ -416,7 +416,7 @@ def _finalize(settings: Settings, material_id: str, *, confirm: bool) -> dict:
             units=tuple(unit for unit, _selector in units),
         ),
     )
-    material_store.remove_intermediates(material.path)
+    material_store.remove_extraction_and_snapshot(material.path)
     return {
         "source": material_id,
         "type": record.type,

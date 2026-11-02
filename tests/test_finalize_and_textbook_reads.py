@@ -4,8 +4,15 @@ import json
 
 import pytest
 
-from conftest import assert_error, blank_pdf, material_status, plan_unit, start_parse
-from course_material_parser import parse_command
+from conftest import (
+    assert_error,
+    blank_pdf,
+    material_status,
+    parse_slides,
+    plan_unit,
+    record_path,
+    start_parse,
+)
 from doc_builders import paged_book
 
 DEST = "ml/prml"
@@ -128,26 +135,45 @@ def test_finalize_before_any_proposal_is_refused(run_parse, library, extraction_
     assert material_status(library, DEST) == "pending"
 
 
-def test_a_finalize_that_fails_part_way_leaves_the_textbook_pending_and_can_be_rerun(
-    run_parse, run_read, library, plan_file, monkeypatch
+def test_finalize_without_confirm_is_refused_even_before_any_proposal(run_parse, extraction_id):
+    assert_error(run_parse("finalize", "--dest", DEST), "confirm_required", "--confirm")
+
+
+def test_a_finalize_that_cannot_write_leaves_the_textbook_pending_and_can_be_rerun(
+    run_parse, run_read, library, plan_file
 ):
-    real_write = parse_command.write_markdown
-    calls = []
-
-    def failing_write(document, selector):
-        calls.append(selector)
-        if len(calls) == 3:
-            raise OSError("disk full")
-        return real_write(document, selector)
-
-    monkeypatch.setattr(parse_command, "write_markdown", failing_write)
-    assert_error(finalize(run_parse), "internal_error", "disk full")
+    folder = library / DEST
+    folder.chmod(0o555)
+    try:
+        assert_error(finalize(run_parse), "internal_error", "PermissionError")
+    finally:
+        folder.chmod(0o755)
 
     assert material_status(library, DEST) == "pending"
     assert_error(run_read("toc", "--source", DEST), "not_found", "not ready (pending)")
-    monkeypatch.setattr(parse_command, "write_markdown", real_write)
     assert finalize(run_parse).exit_code == 0
-    assert "extraction.json" not in stored_files(library)
+
+
+def test_finalize_replaces_contents_left_by_an_interrupted_finalize(run_parse, library, plan_file):
+    leftover = library / DEST / "contents" / "chapter-01" / "section_9-9.md"
+    leftover.parent.mkdir(parents=True)
+    leftover.write_text("<page 1>\n")
+
+    assert finalize(run_parse).exit_code == 0
+
+    assert not leftover.exists()
+
+
+def test_a_record_from_before_finalize_existed_is_still_readable(run_parse, run_read, library):
+    parse_slides(run_parse)
+    path = record_path(library, "ml/week3-slides")
+    record = json.loads(path.read_text())
+    del record["chapters"], record["units"]
+    path.write_text(json.dumps(record))
+
+    result = run_read("toc", "--source", "ml/week3-slides")
+
+    assert result.exit_code == 0, result.stderr
 
 
 def test_textbook_toc_lists_contents_in_reading_order_with_inclusive_ranges(
