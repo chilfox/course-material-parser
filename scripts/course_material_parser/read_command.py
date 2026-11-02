@@ -10,7 +10,12 @@ from typing import assert_never
 
 from course_material_parser import material_store, page_renders
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
-from course_material_parser.material_store import Material, MaterialRecord, MaterialType
+from course_material_parser.material_store import (
+    Material,
+    MaterialRecord,
+    MaterialType,
+    UnitRecord,
+)
 from course_material_parser.page_blocks import join_page_blocks, split_page_blocks
 from course_material_parser.page_spec import PAGES_HELP, parse_pages
 from course_material_parser.settings import Settings, load_settings
@@ -240,7 +245,7 @@ def _get(
 def _get_textbook(
     material: Material, unit_id: str | None, pages: str | None, *, max_chars: int | None
 ) -> str:
-    """Return a textbook unit or chapter by id.
+    """Return a textbook reading unit or chapter by id.
 
     ``max_chars`` limits chapters only, and ``None`` (from ``--confirm``) lifts the limit.
     """
@@ -255,7 +260,7 @@ def _get_textbook(
     unit = next((unit for unit in record.units if unit.id == unit_id), None)
     if unit is not None:
         # --confirm is accepted and ignored: unit reads are never size-checked.
-        return material_store.unit_markdown(material.path, unit).read_text(encoding="utf-8")
+        return _unit_text(material, unit)
     if any(chapter.id == unit_id for chapter in record.chapters):
         return _chapter_markdown(material, unit_id, max_chars=max_chars)
     raise CliError("unknown_id", f"unknown id '{unit_id}' in {source}")
@@ -271,7 +276,7 @@ def _chapter_markdown(material: Material, chapter_id: str, *, max_chars: int | N
         CliError: ``too_large`` when the joined Markdown is longer than ``max_chars``.
     """
     units = [
-        (unit, material_store.unit_markdown(material.path, unit).read_text(encoding="utf-8"))
+        (unit, _unit_text(material, unit))
         for unit in material.record.units
         if unit.chapter == chapter_id
     ]
@@ -279,21 +284,26 @@ def _chapter_markdown(material: Material, chapter_id: str, *, max_chars: int | N
     for _, markdown in units:
         for page, block in split_page_blocks(markdown).items():
             blocks.setdefault(page, block)
-    chapter = join_page_blocks(list(blocks.values()))
-    if max_chars is not None and len(chapter) > max_chars:
+    joined = join_page_blocks(list(blocks.values()))
+    if max_chars is not None and len(joined) > max_chars:
         raise CliError(
             "too_large",
-            f"chapter {chapter_id} is {len(chapter)} characters, over the limit of {max_chars}; "
-            "read its units one at a time with --id, or re-run with --confirm only if the "
+            f"chapter {chapter_id} is {len(joined)} characters, over the limit of {max_chars}; "
+            "read its reading units one at a time with --id, or re-run with --confirm only if the "
             "whole chapter is needed",
-            chars=len(chapter),
+            chars=len(joined),
             limit=max_chars,
             units=[
                 {"id": unit.id, "title": unit.title, "chars": len(markdown)}
                 for unit, markdown in units
             ],
         )
-    return chapter
+    return joined
+
+
+def _unit_text(material: Material, unit: UnitRecord) -> str:
+    """Return the stored Markdown of the reading unit ``unit``, exactly as ``get`` prints it."""
+    return material_store.unit_markdown(material.path, unit).read_text(encoding="utf-8")
 
 
 def _get_slides(material: Material, unit_id: str | None, pages: str | None) -> str:

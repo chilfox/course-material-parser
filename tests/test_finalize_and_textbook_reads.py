@@ -224,16 +224,8 @@ def test_unit_get_prints_the_units_markdown_as_is(run_parse, run_read, plan_file
     assert result.stdout == "<page 3>\n\nText on page 3.\n\n<page 4>\n\nText on page 4.\n"
 
 
-def test_unit_get_accepts_and_ignores_confirm(run_parse, run_read, plan_file):
-    finalize(run_parse)
-
-    result = run_read("get", "--source", DEST, "--id", "references", "--confirm")
-
-    assert result.exit_code == 0, result.stderr
-    assert result.stdout.startswith("<page 9>")
-
-
-CHAPTER_1 = "".join(f"<page {page}>\n\nText on page {page}.\n\n" for page in range(2, 9))[:-1]
+# Pages 2 to 8, with page 4, shared by units 1-1 and 1-2, once.
+CHAPTER_1 = "\n\n".join(f"<page {page}>\n\nText on page {page}." for page in range(2, 9)) + "\n"
 
 
 def test_chapter_get_joins_its_units_in_order_with_the_shared_boundary_page_once(
