@@ -5,6 +5,7 @@ copy, conversion, stored output) that branches on the type only when writing con
 """
 
 import argparse
+import json
 import shutil
 from collections.abc import Callable, Sequence
 from pathlib import Path
@@ -12,7 +13,7 @@ from typing import assert_never
 
 from docling_core.types.doc import DoclingDocument
 
-from course_material_parser import extraction, material_store, pdf
+from course_material_parser import extraction, material_store, pdf, split_plan
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
 from course_material_parser.docling_conversion import (
     ConversionFailed,
@@ -38,6 +39,7 @@ Page numbers are always source-PDF pages counted from 1, not printed page number
 commands:
   start    parse a source PDF into a new material
   inspect  show a pending textbook's detected structure or page content
+  propose  validate a textbook's split plan and save it for the user's approval
 
 See `parse <command> --help` for details."""
 
@@ -69,6 +71,27 @@ Forms:
 
 Running headers and footers are left out of both."""
 
+_PROPOSE_DESCRIPTION = """\
+Validate the split plan at PATH for a pending textbook and save a snapshot of it in the
+material. Every problem is reported at once as invalid_plan; the material stays pending
+and a previous snapshot is kept. A valid plan replaces any previous snapshot and returns
+a summary for the approval request: contents with ids, titles, and pages, and overlaps.
+
+Plan file (every field required, no others allowed):
+  {"version": 1, "extraction_id": "<from inspect>", "contents": [
+    {"id": "front-matter", "title": "Front matter", "kind": "other",
+     "selector": {"kind": "pdf_pages", "start": 1, "end": 20}},
+    {"id": "chapter-01", "title": "Introduction", "units": [
+      {"id": "1-1", "title": "Curve Fitting", "kind": "section",
+       "selector": {"kind": "pdf_pages", "start": 21, "end": 32}}]}]}
+
+contents is in reading order: standalone units and chapters, with each chapter's units
+nested in it. kind is section for a numbered section, other for anything else. Ids use
+lowercase letters, digits, and '-', not starting with '-', and are unique in the plan.
+Pages are inclusive source pages. Units must cover every page, in order of their first
+page. Adjacent units may share only their boundary page, where one ends and the next
+starts; several units may lie on that one page."""
+
 
 def main(
     argv: Sequence[str] | None = None,
@@ -91,6 +114,8 @@ def _run(
     settings = load_settings(settings_path)
     if args.command == "inspect":
         return json_line(_inspect(settings, args.dest, args.pages))
+    if args.command == "propose":
+        return json_line(_propose(settings, args.dest, args.plan))
     return json_line(_start(args, settings, converter))
 
 
@@ -134,6 +159,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     inspect.add_argument("--dest", required=True, metavar="MATERIAL", help="pending textbook")
     inspect.add_argument("--pages", metavar="SPEC", help=f"show content of {PAGES_HELP}")
+    propose = commands.add_parser(
+        "propose",
+        description=_PROPOSE_DESCRIPTION,
+        formatter_class=argparse.RawTextHelpFormatter,
+        help="validate a textbook's split plan and save it for the user's approval",
+    )
+    propose.add_argument("--dest", required=True, metavar="MATERIAL", help="pending textbook")
+    propose.add_argument("--plan", required=True, type=Path, metavar="PATH", help="split plan JSON")
     return parser
 
 
@@ -292,6 +325,40 @@ def _inspect(settings: Settings, material_id: str, pages: str | None) -> dict:
         "extraction_id": material.record.extraction_id,
         "items": extraction.page_items(document, set(selected)),
     }
+
+
+def _propose(settings: Settings, material_id: str, plan_path: Path) -> dict:
+    material = material_store.get_pending_material(settings.library_root, material_id)
+    record = material.record
+    assert record.extraction_id is not None
+    plan = split_plan.parse_plan(
+        _read_plan_file(plan_path),
+        material_id=material_id,
+        page_count=record.pages,
+        extraction_id=record.extraction_id,
+    )
+    material_store.write_plan_snapshot(material.path, split_plan.plan_json(plan))
+    return {
+        "source": material_id,
+        "pdf": record.source_filename,
+        "pages": record.pages,
+        **split_plan.summary(plan),
+    }
+
+
+def _read_plan_file(path: Path) -> object:
+    """Return the decoded JSON of the plan file at ``path``.
+
+    Raises:
+        CliError: ``not_found`` when there is no such file; ``invalid_plan`` when it isn't
+            valid UTF-8 JSON.
+    """
+    if not path.is_file():
+        raise CliError("not_found", f"plan file not found: {path}")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise CliError("invalid_plan", f"{path} is not valid JSON: {error}") from None
 
 
 def _conversion_problem(outcome: ConversionOutcome) -> str | None:
