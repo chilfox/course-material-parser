@@ -2,10 +2,9 @@
 
 import json
 
-import pypdfium2
 import pytest
 
-from conftest import assert_error, material_status, start_parse
+from conftest import assert_error, blank_pdf, material_status, plan_unit, start_parse
 from doc_builders import blank_document
 
 DEST = "ml/prml"
@@ -15,12 +14,7 @@ PAGES = 10
 @pytest.fixture
 def book_pdf(tmp_path):
     """A blank ten-page PDF, so plans can cover more than the two-page fixture."""
-    path = tmp_path / "prml.pdf"
-    document = pypdfium2.PdfDocument.new()
-    for _ in range(PAGES):
-        document.new_page(612, 792)
-    document.save(path)
-    return path
+    return blank_pdf(tmp_path / "prml.pdf", PAGES)
 
 
 @pytest.fixture
@@ -32,28 +26,22 @@ def extraction_id(run_parse, converter, book_pdf):
     return result.json["extraction_id"]
 
 
-def unit(unit_id, title, start, end, kind="section"):
-    return {
-        "id": unit_id,
-        "title": title,
-        "kind": kind,
-        "selector": {"kind": "pdf_pages", "start": start, "end": end},
-    }
-
-
 def valid_plan(extraction_id):
     """Front matter, chapter 1 with two sections sharing page 4, and references."""
     return {
         "version": 1,
         "extraction_id": extraction_id,
         "contents": [
-            unit("front-matter", "Front matter", 1, 1, kind="other"),
+            plan_unit("front-matter", "Front matter", 1, 1, kind="other"),
             {
                 "id": "chapter-01",
                 "title": "Introduction",
-                "units": [unit("1-1", "Curve Fitting", 2, 4), unit("1-2", "Probability", 4, 8)],
+                "units": [
+                    plan_unit("1-1", "Curve Fitting", 2, 4),
+                    plan_unit("1-2", "Probability", 4, 8),
+                ],
             },
-            unit("references", "References", 9, 10, kind="other"),
+            plan_unit("references", "References", 9, 10, kind="other"),
         ],
     }
 
@@ -211,6 +199,10 @@ SECTION_2 = (*CHAPTER, "units", 1)
         (_set(("contents", 2, "selector", "end"), 9), "page 10 is in no unit"),
         (_set(("extraction_id",), "0123456789abcdef"), "extraction_id '0123456789abcdef'"),
         (_set(("contents",), []), "plan: contents is empty"),
+        (
+            _set(("contents", 2), {"id": "chapter-1", "title": "Refs", "units": []}),
+            "chapter chapter-1: same as chapter chapter-01 once numbers are zero-padded",
+        ),
         (_set(("contents", 0), "front-matter"), "contents[0]: not an object"),
     ],
 )
@@ -251,9 +243,9 @@ def test_several_units_may_share_one_page_and_each_shared_page_is_one_overlap(
 ):
     plan = valid_plan(extraction_id)
     plan["contents"][1]["units"] = [
-        unit("1-intro", "Introduction", 2, 4, kind="other"),
-        unit("1-1", "Curve Fitting", 4, 4),
-        unit("1-2", "Probability", 4, 8),
+        plan_unit("1-intro", "Introduction", 2, 4, kind="other"),
+        plan_unit("1-1", "Curve Fitting", 4, 4),
+        plan_unit("1-2", "Probability", 4, 8),
     ]
 
     result = propose(run_parse, tmp_path, plan)

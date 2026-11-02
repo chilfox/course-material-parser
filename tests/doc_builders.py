@@ -65,3 +65,11 @@ def textbook() -> DoclingDocument:
     caption = doc.add_text(label=DocItemLabel.CAPTION, text="Figure 1.1: A curve", prov=prov(2))
     doc.add_picture(caption=caption, prov=prov(2))
     return doc
+
+
+def paged_book(page_count: int) -> DoclingDocument:
+    """Return a document with one paragraph, ``Text on page N.``, on each source page."""
+    doc = blank_document(page_count)
+    for page_no in range(1, page_count + 1):
+        doc.add_text(label=DocItemLabel.TEXT, text=f"Text on page {page_no}.", prov=prov(page_no))
+    return doc

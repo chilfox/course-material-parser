@@ -3,11 +3,19 @@
 A material folder holds ``source.pdf``, ``material.json``, and ``contents/``. A folder
 without ``material.json`` is an interrupted parse, which readers ignore. Other modules ask
 this one for paths instead of building them, so the layout lives in one place.
+
+A ready textbook's ``contents/`` holds its standalone units directly and each chapter's
+units in a folder named after the chapter id with its number zero-padded, so folders sort
+in reading order (``chapter-01``). A numbered section is ``section_<id>.md`` and any other
+unit ``<id>.md``, so a file name says what it holds. There are no chapter files: a chapter
+is its units.
 """
 
 import json
 import os
 import re
+import shutil
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -26,6 +34,7 @@ _PLAN_FILE = "plan.json"
 # One folder name: letters, digits, ".", "_", "-", not starting with "." (so ".", "..",
 # and hidden folders, which discovery skips, are impossible).
 _SEGMENT = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]*")
+_CHAPTER_NUMBER = re.compile(r"\d+")
 
 
 class MaterialType(StrEnum):
@@ -43,12 +52,43 @@ class Status(StrEnum):
     FAILED = "failed"
 
 
+class UnitKind(StrEnum):
+    """Whether a reading unit is a numbered section, which decides its file name."""
+
+    SECTION = "section"
+    OTHER = "other"
+
+
+@dataclass(frozen=True)
+class ChapterRecord:
+    """A chapter of a ready textbook: its unit id and title."""
+
+    id: str
+    title: str
+
+
+@dataclass(frozen=True)
+class UnitRecord:
+    """A reading unit of a ready textbook.
+
+    ``chapter`` is the id of the chapter it belongs to, or ``None`` for a standalone unit.
+    ``pages`` is its approved inclusive ``(start, end)`` range of source pages.
+    """
+
+    id: str
+    title: str
+    kind: UnitKind
+    chapter: str | None
+    pages: tuple[int, int]
+
+
 @dataclass(frozen=True)
 class MaterialRecord:
     """The contents of ``material.json``.
 
     ``extraction_id`` identifies the stored extraction of a pending textbook, so a split
     plan written for one extraction can't be applied to another; it is ``None`` otherwise.
+    ``chapters`` and ``units`` are a ready textbook's, in reading order, and empty otherwise.
     """
 
     type: MaterialType
@@ -56,6 +96,8 @@ class MaterialRecord:
     source_filename: str
     pages: int
     extraction_id: str | None = None
+    chapters: tuple[ChapterRecord, ...] = ()
+    units: tuple[UnitRecord, ...] = ()
     format_version: int = FORMAT_VERSION
 
 
@@ -76,6 +118,25 @@ def source_pdf(material_dir: Path) -> Path:
 def slides_markdown(material_dir: Path) -> Path:
     """Return where a slide deck's Markdown lives."""
     return material_dir / _CONTENTS_DIR / _SLIDES_FILE
+
+
+def unit_markdown(material_dir: Path, unit: UnitRecord) -> Path:
+    """Return where a ready textbook's reading unit ``unit`` lives."""
+    name = f"section_{unit.id}.md" if unit.kind is UnitKind.SECTION else f"{unit.id}.md"
+    contents = material_dir / _CONTENTS_DIR
+    if unit.chapter is None:
+        return contents / name
+    return contents / chapter_folder(unit.chapter) / name
+
+
+def chapter_folder(chapter_id: str) -> str:
+    """Return the folder name of the chapter ``chapter_id``: its numbers zero-padded to two.
+
+    Padding makes folders sort in reading order (``chapter-01`` before ``chapter-10``).
+    Distinct ids can share a folder name (``chapter-1`` and ``chapter-01``), which a split
+    plan must therefore rule out.
+    """
+    return _CHAPTER_NUMBER.sub(lambda number: number.group().zfill(2), chapter_id)
 
 
 def extraction_json(material_dir: Path) -> Path:
@@ -194,6 +255,36 @@ def write_slides(material_dir: Path, markdown: str) -> None:
     path = slides_markdown(material_dir)
     path.parent.mkdir()
     path.write_text(markdown, encoding="utf-8")
+
+
+def write_textbook_units(material_dir: Path, units: Iterable[tuple[UnitRecord, str]]) -> None:
+    """Store a textbook's reading units, each ``(unit, markdown)``, as its whole contents.
+
+    Any ``contents/`` already there can only be left by a finalization that stopped part
+    way, since a pending textbook has none, so it is replaced rather than merged into.
+    """
+    contents = material_dir / _CONTENTS_DIR
+    if contents.exists():
+        shutil.rmtree(contents)
+    contents.mkdir()
+    for unit, markdown in units:
+        path = unit_markdown(material_dir, unit)
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(markdown, encoding="utf-8")
+
+
+def remove_intermediates(material_dir: Path) -> None:
+    """Delete a finalized textbook's stored extraction and plan snapshot."""
+    extraction_json(material_dir).unlink(missing_ok=True)
+    plan_snapshot(material_dir).unlink(missing_ok=True)
+
+
+def read_plan_snapshot(material_dir: Path) -> object | None:
+    """Return the decoded split plan snapshot of a pending textbook, or ``None`` if none."""
+    path = plan_snapshot(material_dir)
+    if not path.is_file():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def write_plan_snapshot(material_dir: Path, plan: dict) -> None:
@@ -329,6 +420,17 @@ def _exists_exactly(library_root: Path, material_id: str) -> bool:
 def _load(library_root: Path, path: Path) -> Material:
     raw = json.loads((path / _METADATA_FILE).read_text(encoding="utf-8"))
     record = MaterialRecord(
-        **{**raw, "type": MaterialType(raw["type"]), "status": Status(raw["status"])}
+        **{
+            **raw,
+            "type": MaterialType(raw["type"]),
+            "status": Status(raw["status"]),
+            "chapters": tuple(ChapterRecord(**chapter) for chapter in raw["chapters"]),
+            "units": tuple(
+                UnitRecord(
+                    **{**unit, "kind": UnitKind(unit["kind"]), "pages": tuple(unit["pages"])}
+                )
+                for unit in raw["units"]
+            ),
+        }
     )
     return Material(material_id=path.relative_to(library_root).as_posix(), path=path, record=record)

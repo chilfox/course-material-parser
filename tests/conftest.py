@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import pypdfium2
 import pytest
 from docling_core.types.doc import DoclingDocument
 
@@ -118,6 +119,25 @@ def parse_slides(run_parse, dest: str = "ml/week3-slides") -> None:
     """Parse the text-layer fixture as slides into ``dest`` and assert it succeeded."""
     result = start_parse(run_parse, dest=dest)
     assert result.exit_code == 0, result.stderr
+
+
+def blank_pdf(path: Path, pages: int) -> Path:
+    """Write a blank PDF of ``pages`` pages at ``path`` and return it."""
+    document = pypdfium2.PdfDocument.new()
+    for _ in range(pages):
+        document.new_page(612, 792)
+    document.save(path)
+    return path
+
+
+def plan_unit(unit_id: str, title: str, start: int, end: int, kind: str = "section") -> dict:
+    """Return a split plan unit selecting source pages ``start`` to ``end``."""
+    return {
+        "id": unit_id,
+        "title": title,
+        "kind": kind,
+        "selector": {"kind": "pdf_pages", "start": start, "end": end},
+    }
 
 
 def record_path(library: Path, dest: str) -> Path:

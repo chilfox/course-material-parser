@@ -8,6 +8,7 @@ import argparse
 import json
 import shutil
 from collections.abc import Callable, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import assert_never
 
@@ -25,7 +26,14 @@ from course_material_parser.docling_conversion import (
     save_document,
 )
 from course_material_parser.markdown_writer import PdfPages, write_markdown
-from course_material_parser.material_store import Material, MaterialRecord, MaterialType, Status
+from course_material_parser.material_store import (
+    ChapterRecord,
+    Material,
+    MaterialRecord,
+    MaterialType,
+    Status,
+    UnitRecord,
+)
 from course_material_parser.page_spec import PAGES_HELP, parse_pages
 from course_material_parser.provenance import missing_provenance
 from course_material_parser.settings import Settings, load_settings, require_device_available
@@ -40,6 +48,7 @@ commands:
   start    parse a source PDF into a new material
   inspect  show a pending textbook's detected structure or page content
   propose  validate a textbook's split plan and save it for the user's approval
+  finalize split a textbook as the user approved, making it ready to read
 
 See `parse <command> --help` for details."""
 
@@ -92,6 +101,13 @@ Pages are inclusive source pages. Units must cover every page, in order of their
 page. Adjacent units may share only their boundary page, where one ends and the next
 starts; several units may lie on that one page."""
 
+_FINALIZE_DESCRIPTION = """\
+Split a pending textbook by its proposed plan snapshot and make it ready to read. Only
+the snapshot saved by the last `parse propose` runs: edits to the plan file since then
+have no effect until proposed again and approved again. Pass --confirm only after the
+user approved that proposal; without it, finalize is refused. A ready textbook can't be
+finalized again. Read the result with `read toc` and `read get`."""
+
 
 def main(
     argv: Sequence[str] | None = None,
@@ -116,6 +132,8 @@ def _run(
         return json_line(_inspect(settings, args.dest, args.pages))
     if args.command == "propose":
         return json_line(_propose(settings, args.dest, args.plan))
+    if args.command == "finalize":
+        return json_line(_finalize(settings, args.dest, confirm=args.confirm))
     return json_line(_start(args, settings, converter))
 
 
@@ -167,6 +185,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     propose.add_argument("--dest", required=True, metavar="MATERIAL", help="pending textbook")
     propose.add_argument("--plan", required=True, type=Path, metavar="PATH", help="split plan JSON")
+    finalize = commands.add_parser(
+        "finalize",
+        description=_FINALIZE_DESCRIPTION,
+        help="split a textbook as the user approved, making it ready to read",
+    )
+    finalize.add_argument("--dest", required=True, metavar="MATERIAL", help="pending textbook")
+    finalize.add_argument(
+        "--confirm", action="store_true", help="assert that the user approved the proposal"
+    )
     return parser
 
 
@@ -344,6 +371,85 @@ def _propose(settings: Settings, material_id: str, plan_path: Path) -> dict:
         "pages": record.pages,
         **split_plan.summary(plan),
     }
+
+
+def _finalize(settings: Settings, material_id: str, *, confirm: bool) -> dict:
+    material = material_store.get_pending_material(settings.library_root, material_id)
+    record = material.record
+    assert record.extraction_id is not None
+    snapshot = material_store.read_plan_snapshot(material.path)
+    if snapshot is None:
+        raise CliError(
+            "invalid_request",
+            f"{material_id} has no proposed split plan; run `parse propose` and get the "
+            "user's approval first",
+        )
+    if not confirm:
+        raise CliError(
+            "confirm_required",
+            "finalize splits the textbook as last proposed; re-run with --confirm only after "
+            "the user approved that proposal",
+        )
+    # Validated again rather than trusted, so a snapshot that no longer fits its
+    # extraction is refused instead of producing units the user never approved.
+    plan = split_plan.parse_plan(
+        snapshot,
+        material_id=material_id,
+        page_count=record.pages,
+        extraction_id=record.extraction_id,
+    )
+    document = load_document(material_store.extraction_json(material.path))
+    chapters, units = _stored_contents(plan)
+    material_store.write_textbook_units(
+        material.path,
+        ((unit, write_markdown(document, selector)) for unit, selector in units),
+    )
+    # ready is written last, and atomically: a finalization that stops before this point
+    # leaves the textbook pending, with its extraction and snapshot, so it can be re-run.
+    material_store.write_record(
+        material.path,
+        replace(
+            record,
+            status=Status.READY,
+            extraction_id=None,
+            chapters=chapters,
+            units=tuple(unit for unit, _selector in units),
+        ),
+    )
+    material_store.remove_intermediates(material.path)
+    return {
+        "source": material_id,
+        "type": record.type,
+        "status": Status.READY,
+        "pages": record.pages,
+        "chapters": len(chapters),
+        "units": len(units),
+    }
+
+
+def _stored_contents(
+    plan: split_plan.SplitPlan,
+) -> tuple[tuple[ChapterRecord, ...], list[tuple[UnitRecord, PdfPages]]]:
+    """Return the chapters of ``plan`` and its units with their selectors, in reading order."""
+    chapters: list[ChapterRecord] = []
+    units: list[tuple[UnitRecord, PdfPages]] = []
+    for entry in plan.contents:
+        if isinstance(entry, split_plan.Chapter):
+            chapters.append(ChapterRecord(id=entry.id, title=entry.title))
+            units.extend((_unit_record(unit, entry.id), unit.selector) for unit in entry.units)
+        else:
+            units.append((_unit_record(entry, None), entry.selector))
+    return tuple(chapters), units
+
+
+def _unit_record(unit: split_plan.Unit, chapter_id: str | None) -> UnitRecord:
+    return UnitRecord(
+        id=unit.id,
+        title=unit.title,
+        kind=unit.kind,
+        chapter=chapter_id,
+        pages=(unit.first_page, unit.last_page),
+    )
 
 
 def _read_plan_file(path: Path) -> object:

@@ -10,7 +10,7 @@ from typing import assert_never
 
 from course_material_parser import material_store, page_renders
 from course_material_parser.cli_output import CliError, JsonArgumentParser, json_line, run_cli
-from course_material_parser.material_store import Material, MaterialType
+from course_material_parser.material_store import Material, MaterialRecord, MaterialType
 from course_material_parser.page_blocks import join_page_blocks, split_page_blocks
 from course_material_parser.page_spec import PAGES_HELP, parse_pages
 from course_material_parser.settings import Settings, load_settings
@@ -158,10 +158,37 @@ def _toc(settings: Settings, source: str) -> dict:
         case MaterialType.SLIDES:
             return {"source": source, "type": material.record.type, "pages": material.record.pages}
         case MaterialType.TEXTBOOK:
-            # Nothing finalizes a textbook into ready material yet, so this can't be reached.
-            raise NotImplementedError("textbook tocs are not supported yet")
+            return {
+                "source": source,
+                "type": material.record.type,
+                "pages": material.record.pages,
+                "contents": _textbook_contents(material.record),
+            }
         case unhandled:
             assert_never(unhandled)
+
+
+def _textbook_contents(record: MaterialRecord) -> list[dict]:
+    """Return a textbook's standalone units and chapters in reading order, as ``toc`` shows.
+
+    A chapter's units are contiguous in reading order, so it is placed where its first
+    unit is, and its pages span its units.
+    """
+    titles = {chapter.id: chapter.title for chapter in record.chapters}
+    contents: list[dict] = []
+    for unit in record.units:
+        entry = {"id": unit.id, "title": unit.title, "pages": list(unit.pages)}
+        if unit.chapter is None:
+            contents.append(entry)
+            continue
+        if not contents or contents[-1]["id"] != unit.chapter:
+            contents.append(
+                {"id": unit.chapter, "title": titles[unit.chapter], "pages": None, "units": []}
+            )
+        chapter = contents[-1]
+        chapter["units"].append(entry)
+        chapter["pages"] = [chapter["units"][0]["pages"][0], unit.pages[1]]
+    return contents
 
 
 def _render(settings: Settings, source: str, pages: str) -> dict:
@@ -198,10 +225,27 @@ def _get(settings: Settings, source: str, unit_id: str | None, pages: str | None
             # --confirm is accepted and ignored: slide reads are never size-checked.
             return _get_slides(material, unit_id, pages)
         case MaterialType.TEXTBOOK:
-            # Nothing finalizes a textbook into ready material yet, so this can't be reached.
-            raise NotImplementedError("textbook reads are not supported yet")
+            return _get_textbook(material, unit_id, pages)
         case unhandled:
             assert_never(unhandled)
+
+
+def _get_textbook(material: Material, unit_id: str | None, pages: str | None) -> str:
+    source = material.material_id
+    if pages is not None:
+        raise CliError(
+            "invalid_request", f"--pages applies only to slides; {source} is a textbook, use --id"
+        )
+    if unit_id is None:
+        raise CliError("invalid_request", f"missing --id: {source} is a textbook")
+    record = material.record
+    unit = next((unit for unit in record.units if unit.id == unit_id), None)
+    if unit is not None:
+        # --confirm is accepted and ignored: unit reads are never size-checked.
+        return material_store.unit_markdown(material.path, unit).read_text(encoding="utf-8")
+    if any(chapter.id == unit_id for chapter in record.chapters):
+        raise NotImplementedError("chapter reads are not supported yet")
+    raise CliError("unknown_id", f"unknown id '{unit_id}' in {source}")
 
 
 def _get_slides(material: Material, unit_id: str | None, pages: str | None) -> str:

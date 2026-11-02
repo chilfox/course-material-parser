@@ -20,10 +20,10 @@ Several units may still lie on one shared page.
 import re
 from collections.abc import Iterator
 from dataclasses import dataclass
-from enum import StrEnum
 
 from course_material_parser.cli_output import CliError
 from course_material_parser.markdown_writer import PdfPages
+from course_material_parser.material_store import UnitKind, chapter_folder
 
 PLAN_VERSION = 1
 # Not starting with "-", so an id can't be mistaken for a flag in `read get --id`.
@@ -32,13 +32,6 @@ _CHAPTER_FIELDS = ("id", "title", "units")
 _UNIT_FIELDS = ("id", "title", "kind", "selector")
 _PLAN_FIELDS = ("version", "extraction_id", "contents")
 _SELECTOR_FIELDS = ("kind", "start", "end")
-
-
-class UnitKind(StrEnum):
-    """Whether a reading unit is a numbered section, which decides its file name."""
-
-    SECTION = "section"
-    OTHER = "other"
 
 
 @dataclass(frozen=True)
@@ -124,6 +117,9 @@ class _Validator:
         self.extraction_id = extraction_id
         self.problems: list[str] = []
         self._seen_ids: set[str] = set()
+        # Chapter ids by their folder name, which zero-pads numbers, so ids that differ
+        # only in padding (chapter-1, chapter-01) are caught before they share a folder.
+        self._chapter_folders: dict[str, str] = {}
         # Every unit's page range, labelled as in messages, so page problems are found
         # even in units with other problems.
         self._ranges: list[tuple[str, PdfPages]] = []
@@ -175,7 +171,7 @@ class _Validator:
         label = self._label("chapter", raw, where)
         if not self._fields(raw, label, _CHAPTER_FIELDS):
             return None
-        valid = self._id_and_title(raw, label)
+        valid = self._id_and_title(raw, label) and self._distinct_folder(raw["id"], label)
         units_raw = raw["units"]
         if not isinstance(units_raw, list):
             self.problems.append(f"{label}: units is not a list")
@@ -261,6 +257,16 @@ class _Validator:
             self.problems.append(f"{label}: empty title")
             valid = False
         return valid
+
+    def _distinct_folder(self, chapter_id: str, label: str) -> bool:
+        folder = chapter_folder(chapter_id)
+        other = self._chapter_folders.setdefault(folder, chapter_id)
+        if other == chapter_id:
+            return True
+        self.problems.append(
+            f"{label}: same as chapter {other} once numbers are zero-padded; rename one"
+        )
+        return False
 
     def _fields(self, raw: object, label: str, fields: tuple[str, ...]) -> bool:
         """Report a non-object or missing and unknown fields; return whether all are present."""
