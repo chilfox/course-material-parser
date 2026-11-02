@@ -18,6 +18,11 @@ _KIND_NOUNS = {
 }
 
 
+def source_pages(item: DocItem) -> set[int]:
+    """Return every source page in the provenance of ``item``; empty when it has none."""
+    return {prov.page_no for prov in item.prov}
+
+
 def missing_provenance(doc: DoclingDocument) -> str | None:
     """Describe the body items of ``doc`` that have no source page, or return ``None``.
 

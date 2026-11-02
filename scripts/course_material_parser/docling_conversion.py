@@ -3,6 +3,8 @@
 ``DoclingConverter`` turns a source PDF into a DoclingDocument with formula enrichment on,
 and reports success, failure, and partial conversion as distinct outcomes. Entry points
 accept any object with the same ``convert`` method, so tests inject a fake.
+``save_document`` and ``load_document`` store a converted document as DoclingDocument JSON
+and load it back, so a textbook is split later without converting again.
 """
 
 import os
@@ -14,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-from docling_core.types.doc import DoclingDocument
+from docling_core.types.doc import DoclingDocument, ImageRefMode
 
 
 @dataclass(frozen=True)
@@ -48,6 +50,20 @@ class Converter(Protocol):
     def convert(self, pdf: Path, *, device: str, ocr: bool) -> ConversionOutcome:
         """Convert ``pdf`` on ``device`` (``cpu``, ``mps``, or ``cuda``), with OCR if ``ocr``."""
         ...
+
+
+def save_document(document: DoclingDocument, path: Path) -> None:
+    """Save ``document`` as DoclingDocument JSON at ``path``, everything except images.
+
+    Picture image data is left out: renders come from the retained source PDF, and
+    embedded images would make the stored extraction of a long textbook very large.
+    """
+    document.save_as_json(path, image_mode=ImageRefMode.PLACEHOLDER)
+
+
+def load_document(path: Path) -> DoclingDocument:
+    """Load the DoclingDocument saved by ``save_document`` at ``path``."""
+    return DoclingDocument.load_from_json(path)
 
 
 class DoclingConverter:
