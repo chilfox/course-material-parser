@@ -51,10 +51,10 @@ class Converter(Protocol):
 
 
 def save_document(document: DoclingDocument, path: Path) -> None:
-    """Save ``document`` losslessly as DoclingDocument JSON at ``path``.
+    """Save ``document`` as DoclingDocument JSON at ``path``, everything except images.
 
-    Picture images are left out: renders come from the retained source PDF, and embedded
-    images would make the stored extraction of a long textbook very large.
+    Picture image data is left out: renders come from the retained source PDF, and
+    embedded images would make the stored extraction of a long textbook very large.
     """
     document.save_as_json(path, image_mode=ImageRefMode.PLACEHOLDER)
 

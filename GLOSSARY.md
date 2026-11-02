@@ -17,6 +17,13 @@ The readable representation of a source PDF, including its text, structure, and 
 **Split plan**:
 A proposed organization of a textbook's content into chapters and sections for separate reading.
 
+**Extraction**:
+The stored result of converting a textbook once, kept while the textbook is pending so its split can be planned and applied without converting again. Its extraction id ties a split plan to exactly this extraction.
+
+**Structure index**:
+A compact view of a pending textbook's extraction for planning its split: page count, the detected headings with their levels and source pages, status, and extraction id. Evidence of what was detected, not an authoritative outline.
+_Avoid_: outline, table of contents
+
 **Reading unit**:
 A separately readable portion of a textbook, normally a main numbered section or a named portion such as a chapter introduction or references.
 
