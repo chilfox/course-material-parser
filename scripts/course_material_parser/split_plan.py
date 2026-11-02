@@ -1,13 +1,7 @@
 """The split plan format: how a pending textbook is organized into chapters and units.
 
-A plan is JSON written by the agent, at any path, and fixed with its edit tool:
-
-    {"version": 1, "extraction_id": "...", "contents": [
-      {"id": "front-matter", "title": "Front matter", "kind": "other",
-       "selector": {"kind": "pdf_pages", "start": 1, "end": 20}},
-      {"id": "chapter-01", "title": "Introduction", "units": [
-        {"id": "1-1", "title": "Curve Fitting", "kind": "section",
-         "selector": {"kind": "pdf_pages", "start": 21, "end": 32}}]}]}
+A plan is JSON written by the agent, at any path, and fixed with its edit tool; its
+format is documented once, in ``parse propose --help``.
 
 ``contents`` is in reading order and shaped like ``read toc``: each entry is a standalone
 reading unit or a chapter, told apart by ``units``. Nesting units under their chapter
@@ -56,6 +50,16 @@ class Unit:
     kind: UnitKind
     selector: PdfPages
 
+    @property
+    def first_page(self) -> int:
+        """The first source page the unit selects."""
+        return self.selector.start
+
+    @property
+    def last_page(self) -> int:
+        """The last source page the unit selects."""
+        return self.selector.end
+
 
 @dataclass(frozen=True)
 class Chapter:
@@ -95,8 +99,10 @@ def parse_plan(raw: object, *, material_id: str, page_count: int, extraction_id:
         CliError: ``invalid_plan`` with every problem found, in plan order, as
             ``problems`` and in the message.
     """
-    validator = _Validator(material_id=material_id, page_count=page_count)
-    plan = validator.plan(raw, extraction_id)
+    validator = _Validator(
+        material_id=material_id, page_count=page_count, extraction_id=extraction_id
+    )
+    plan = validator.plan(raw)
     if validator.problems:
         count = len(validator.problems)
         raise CliError(
@@ -112,35 +118,39 @@ def parse_plan(raw: object, *, material_id: str, page_count: int, extraction_id:
 class _Validator:
     """Collects every problem of one plan while building the parts that are valid."""
 
-    def __init__(self, *, material_id: str, page_count: int) -> None:
+    def __init__(self, *, material_id: str, page_count: int, extraction_id: str) -> None:
         self.material_id = material_id
         self.page_count = page_count
+        self.extraction_id = extraction_id
         self.problems: list[str] = []
         self._seen_ids: set[str] = set()
-        self._units: list[Unit] = []
-        self._all_units_valid = True
+        # Every unit's page range, labelled as in messages, so page problems are found
+        # even in units with other problems.
+        self._ranges: list[tuple[str, PdfPages]] = []
+        self._ranges_known = True
 
-    def plan(self, raw: object, extraction_id: str) -> SplitPlan | None:
+    def plan(self, raw: object) -> SplitPlan | None:
         if not self._fields(raw, "plan", _PLAN_FIELDS):
             return None
         assert isinstance(raw, dict)
-        if raw["version"] != PLAN_VERSION or isinstance(raw["version"], bool):
+        if type(raw["version"]) is not int or raw["version"] != PLAN_VERSION:
             self.problems.append(
-                f"version {_show(raw['version'])} is not supported: use {PLAN_VERSION}"
+                f"version {_quoted(raw['version'])} is not supported: use {PLAN_VERSION}"
             )
-        if raw["extraction_id"] != extraction_id:
+        if raw["extraction_id"] != self.extraction_id:
             self.problems.append(
-                f"extraction_id {_show(raw['extraction_id'])} does not match the pending "
-                f"extraction {extraction_id} of {self.material_id}; inspect it and update the plan"
+                f"extraction_id {_quoted(raw['extraction_id'])} does not match the pending "
+                f"extraction {self.extraction_id} of {self.material_id}; "
+                "inspect it and update the plan"
             )
         contents = self._contents(raw["contents"])
         # Order and coverage are only meaningful when every unit's pages are known.
-        if self._all_units_valid:
-            self._check_order(self._units)
-            self._check_coverage(self._units)
+        if self._ranges_known:
+            self._check_order()
+            self._check_coverage()
         if self.problems:
             return None
-        return SplitPlan(extraction_id=extraction_id, contents=tuple(contents))
+        return SplitPlan(extraction_id=self.extraction_id, contents=tuple(contents))
 
     def _contents(self, raw: object) -> list[Unit | Chapter]:
         if not isinstance(raw, list):
@@ -169,7 +179,7 @@ class _Validator:
         units_raw = raw["units"]
         if not isinstance(units_raw, list):
             self.problems.append(f"{label}: units is not a list")
-            self._all_units_valid = False
+            self._ranges_known = False
             return None
         if not units_raw:
             self.problems.append(f"{label}: no units")
@@ -181,29 +191,31 @@ class _Validator:
 
     def _unit(self, raw: object, where: str) -> Unit | None:
         label = self._label("unit", raw, where)
+        if not isinstance(raw, dict) or "selector" not in raw:
+            self._ranges_known = False
         if not self._fields(raw, label, _UNIT_FIELDS):
-            self._all_units_valid = False
             return None
         assert isinstance(raw, dict)
+        selector = self._selector(raw["selector"], label)
+        if selector is None:
+            self._ranges_known = False
+        else:
+            self._ranges.append((label, selector))
         valid = self._id_and_title(raw, label)
         kind = raw["kind"]
         if kind not in tuple(UnitKind):
-            self.problems.append(f"{label}: kind {_show(kind)} is not section or other")
+            self.problems.append(f"{label}: kind {_quoted(kind)} is not section or other")
             valid = False
-        selector = self._selector(raw["selector"], label)
         if not valid or selector is None:
-            self._all_units_valid = False
             return None
-        unit = Unit(raw["id"], raw["title"], UnitKind(kind), selector)
-        self._units.append(unit)
-        return unit
+        return Unit(raw["id"], raw["title"], UnitKind(kind), selector)
 
     def _selector(self, raw: object, label: str) -> PdfPages | None:
         if not self._fields(raw, f"{label}: selector", _SELECTOR_FIELDS):
             return None
         assert isinstance(raw, dict)
         if raw["kind"] != "pdf_pages":
-            self.problems.append(f"{label}: selector kind {_show(raw['kind'])} is not pdf_pages")
+            self.problems.append(f"{label}: selector kind {_quoted(raw['kind'])} is not pdf_pages")
             return None
         bounds = [raw["start"], raw["end"]]
         valid = True
@@ -230,17 +242,22 @@ class _Validator:
         unit_id = raw["id"]
         if not isinstance(unit_id, str) or not _ID.fullmatch(unit_id):
             self.problems.append(
-                f"invalid id {_show(unit_id)}: use lowercase letters, digits, and '-', "
+                f"{label}: invalid id {_quoted(unit_id)}: use lowercase letters, digits, and '-', "
                 "not starting with '-'"
             )
             valid = False
         elif unit_id in self._seen_ids:
-            self.problems.append(f"duplicate id '{unit_id}': ids must be unique in the material")
+            self.problems.append(
+                f"{label}: duplicate id '{unit_id}': ids must be unique in the plan"
+            )
             valid = False
         else:
             self._seen_ids.add(unit_id)
         title = raw["title"]
-        if not isinstance(title, str) or not title.strip():
+        if not isinstance(title, str):
+            self.problems.append(f"{label}: title is not a string")
+            valid = False
+        elif not title.strip():
             self.problems.append(f"{label}: empty title")
             valid = False
         return valid
@@ -258,23 +275,23 @@ class _Validator:
                 self.problems.append(f"{label}: unknown field '{name}'")
         return not missing
 
-    def _check_order(self, units: list[Unit]) -> None:
-        for before, after in zip(units, units[1:], strict=False):
-            if after.selector.start < before.selector.start:
+    def _check_order(self) -> None:
+        for (before, earlier), (after, later) in zip(self._ranges, self._ranges[1:], strict=False):
+            if later.start < earlier.start:
                 self.problems.append(
-                    f"unit {after.id}: starts on page {after.selector.start}, "
-                    f"before unit {before.id} on page {before.selector.start}"
+                    f"{after}: starts on page {later.start}, "
+                    f"before {before} on page {earlier.start}"
                 )
-            elif after.selector.start < before.selector.end:
+            elif later.start < earlier.end:
                 self.problems.append(
-                    f"unit {after.id}: pages {_pages(after)} overlap unit {before.id} "
-                    f"(pages {_pages(before)}) by more than one boundary page"
+                    f"{after}: pages {_span(later)} overlap {before} (pages {_span(earlier)}) "
+                    "by more than one boundary page"
                 )
 
-    def _check_coverage(self, units: list[Unit]) -> None:
+    def _check_coverage(self) -> None:
         covered = set()
-        for unit in units:
-            covered.update(range(unit.selector.start, unit.selector.end + 1))
+        for _label, pages in self._ranges:
+            covered.update(range(pages.start, pages.end + 1))
         missing = [page for page in range(1, self.page_count + 1) if page not in covered]
         for start, end in _runs(missing):
             if start == end:
@@ -290,12 +307,13 @@ class _Validator:
         return where
 
 
-def _show(value: object) -> str:
+def _quoted(value: object) -> str:
+    """Return ``value`` for a message, quoting strings so they read as plan values."""
     return f"'{value}'" if isinstance(value, str) else str(value)
 
 
-def _pages(unit: Unit) -> str:
-    return f"{unit.selector.start}-{unit.selector.end}"
+def _span(pages: PdfPages) -> str:
+    return f"{pages.start}-{pages.end}"
 
 
 def _runs(pages: list[int]) -> Iterator[tuple[int, int]]:
@@ -346,7 +364,7 @@ def summary(plan: SplitPlan) -> dict:
     for entry in plan.contents:
         if isinstance(entry, Chapter):
             units = [_unit_summary(unit) for unit in entry.units]
-            pages = [entry.units[0].selector.start, entry.units[-1].selector.end]
+            pages = [entry.units[0].first_page, entry.units[-1].last_page]
             contents.append({"id": entry.id, "title": entry.title, "pages": pages, "units": units})
         else:
             contents.append(_unit_summary(entry))
@@ -354,15 +372,15 @@ def summary(plan: SplitPlan) -> dict:
 
 
 def _unit_summary(unit: Unit) -> dict:
-    return {"id": unit.id, "title": unit.title, "pages": [unit.selector.start, unit.selector.end]}
+    return {"id": unit.id, "title": unit.title, "pages": [unit.first_page, unit.last_page]}
 
 
 def _overlaps(plan: SplitPlan) -> list[dict]:
     shared: dict[int, list[str]] = {}
     units = list(plan.units())
     for before, after in zip(units, units[1:], strict=False):
-        if before.selector.end == after.selector.start:
-            ids = shared.setdefault(after.selector.start, [before.id])
+        if before.last_page == after.first_page:
+            ids = shared.setdefault(after.first_page, [before.id])
             if ids[-1] != before.id:
                 ids.append(before.id)
             ids.append(after.id)
