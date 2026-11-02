@@ -220,32 +220,25 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
             material_store.write_slides(
                 destination, write_markdown(outcome.document, PdfPages(start=1, end=pages))
             )
-            record = MaterialRecord(
-                type=material_type, status=Status.READY, source_filename=source.name, pages=pages
-            )
-            # Written last, so a material is only ever ready once all its contents exist.
-            material_store.write_record(destination, record)
-            return {
-                "source": args.dest,
-                "type": material_type,
-                "status": Status.READY,
-                "pages": pages,
-            }
+            status, extraction_id = Status.READY, None
         case MaterialType.TEXTBOOK:
             extraction_path = material_store.extraction_json(destination)
             save_document(outcome.document, extraction_path)
-            record = MaterialRecord(
-                type=material_type,
-                status=Status.PENDING,
-                source_filename=source.name,
-                pages=pages,
-                extraction_id=extraction.extraction_id(extraction_path),
-            )
-            # Written last, so a material is only ever pending once its extraction exists.
-            material_store.write_record(destination, record)
-            return _structure_index(Material(args.dest, destination, record), outcome.document)
+            status, extraction_id = Status.PENDING, extraction.extraction_id(extraction_path)
         case unhandled:
             assert_never(unhandled)
+    record = MaterialRecord(
+        type=material_type,
+        status=status,
+        source_filename=source.name,
+        pages=pages,
+        extraction_id=extraction_id,
+    )
+    # Written last, so a material only ever shows a status once everything it needs exists.
+    material_store.write_record(destination, record)
+    if material_type is MaterialType.TEXTBOOK:
+        return _structure_index(Material(args.dest, destination, record), outcome.document)
+    return {"source": args.dest, "type": material_type, "status": status, "pages": pages}
 
 
 def _structure_index(material: Material, document: DoclingDocument) -> dict:
