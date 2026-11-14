@@ -1,107 +1,173 @@
 # Course material parser
 
-A local agent skill that parses course PDFs (lecture slides and textbooks) with [Docling](https://github.com/docling-project/docling) into parsed material, and gives agents two CLIs: `parse` to create parsed material and `read` to read it.
-Everything runs locally.
+**English** | [繁體中文](README.zh-TW.md)
 
-Supported platforms: Apple Silicon macOS and Linux (x86_64 and arm64).
-You need [uv](https://docs.astral.sh/uv/).
+A local agent skill for reading course textbooks and lecture slides—including the
+pages, diagrams, and formulas you want to discuss.
 
-## Setup
+## 🌟 Highlights
 
-Run these steps from the skill directory (the repository root):
+- **Read what you need.** Navigate textbooks by chapter or reading unit, and slides
+  by source page, without loading the entire PDF into the conversation.
+- **See the page, not just its text.** The agent can render source pages as images
+  to examine diagrams, charts, and other visuals alongside the parsed content.
+- **Build a reusable course library.** Parse PDFs once, then return to the stored
+  material for later questions and study sessions.
+- **Keep processing local.** PDF conversion and page rendering run on your machine;
+  parsing needs no network after model setup.
 
-1. Install Python 3.12 and the locked dependencies:
+## ℹ️ Overview
 
-   ```sh
-   uv sync
-   ```
+This skill helps your agent work with course material: find a textbook or slide deck,
+read the relevant content, and inspect source pages when a visual matters. It uses
+[Docling](https://github.com/docling-project/docling) to turn source PDFs into parsed
+material with text, structure, and references to visuals. Textbooks are organized into
+chapters and reading units with your approval; slides remain readable by source page.
 
-2. Create your settings, then set `library_root` and `device`:
+## 🚀 Usage
 
-   ```sh
-   cp settings.example.toml settings.toml
-   ```
+After installation, ask your agent about material in your library:
 
-   The comments in `settings.example.toml` explain each key and which `device` fits your platform.
+> Read section 1.1 of my economics textbook and explain how income shifts demand.
 
-3. Download the models your settings need (re-run after changing `device` or `allow_ocr`):
+> Show me the supply-and-demand diagram in chapter 1 and explain the curves.
 
-   ```sh
-   uv run download-models
-   ```
+> Read pages 8–12 of my lecture slides and summarize the main ideas.
 
-Setup validates settings and device availability, skips models already present, and never deletes
-models. It prints each model fetched or skipped and the directory used.
-After setup, parsing needs no network. Before creating anything, `parse start` checks that the
-models it needs are present and reports `models_missing` with the setup command if not.
+The agent finds the material, checks its contents, and reads the relevant chapters,
+reading units, or slides. When it needs to inspect a visual, it renders the source page
+and views the resulting image. Page numbers mean source-PDF pages counted from 1,
+not the labels printed in the PDF.
 
-## Device
+```mermaid
+flowchart LR
+    A[Your question] --> B[Find material and relevant content]
+    B --> C[Read text]
+    C --> D{Need to see a visual?}
+    D -->|Yes| E[Render and view source page]
+    D -->|No| F[Respond using the material]
+    E --> F
+```
 
-The configured `device` decides what is used.
-It is never chosen automatically:
+### Add a PDF to your library
 
-- `mps` on Apple Silicon.
-  The formula model (CodeFormulaV2) runs on the GPU through Docling's MLX engine.
-  Table structure still runs on CPU (an upstream limitation); other stages use MPS.
-  An unavailable `mlx-vlm` runtime is a `settings_error`: run `uv sync` on Apple Silicon macOS.
-  Missing MLX weights are `models_missing`. Neither condition falls back to CPU.
-- `cuda` on Linux with an NVIDIA GPU.
-  Linux uses the default PyPI PyTorch build.
-- `cpu` works everywhere. The formula model uses float32 to avoid slow CPU bfloat16 inference.
+> Parse `~/courses/economics/textbook.pdf` into my course library.
 
-On `cuda`, the formula model keeps Docling's default dtype.
+The agent suggests a destination and material type for you to confirm. Slides become
+ready to read after parsing. For textbooks, the agent examines the extracted structure
+and proposes a split into chapters and reading units.
 
-## Models
+An illustrative organization of the resulting parsed material:
 
-`download-models` reads `device` and `allow_ocr` from `settings.toml` and downloads only the
-models they need (about 1.2 GB without OCR, for either formula engine). Models go to Docling's `cache_dir/models`, normally
-`~/.cache/docling/models`; `DOCLING_CACHE_DIR` overrides the cache directory. Conversion reads
-that same directory, so parsing needs no network after setup.
+```text
+economics/textbook
+├── Chapter 1: Supply and demand
+│   ├── Introduction
+│   ├── 1.1 Demand
+│   ├── 1.2 Supply
+│   └── Exercises
+├── Chapter 2: Elasticity
+│   ├── Introduction
+│   ├── 2.1 Price elasticity of demand
+│   ├── 2.2 Income and cross-price elasticity
+│   └── Exercises
+├── Chapter 3: Consumer choice
+│   ├── 3.1 Budget constraints
+│   ├── 3.2 Preferences
+│   ├── 3.3 Optimal choice
+│   └── Exercises
+└── Chapter 4: Production and costs
+    ├── Introduction
+    ├── 4.1 Production functions
+    ├── 4.2 Short-run and long-run costs
+    └── Exercises
+```
 
-From any working directory, run `uv run --project <skill-dir> download-models`.
-`parse start` checks model folders immediately after device availability and before destination
-checks. Missing folders are reported without creating an interrupted parse or failed material.
-RapidOCR is checked only for a parse with `--ocr`.
+```mermaid
+flowchart TD
+    A[Confirm destination and type] --> B[Extract textbook]
+    B --> C[Inspect structure and page content]
+    C --> D[Propose split]
+    D --> E{Your review}
+    E -->|Request changes| D
+    E -->|Approve| F[Finalize parsed material]
+    F --> G[Ready to read]
+```
 
-| Model | Approximate size | Used for |
-|---|---|---|
-| `docling-layout-heron` | 164 MB | Page layout, all devices |
-| TableFormer (`docling-models`) | 342 MB | Table structure, all devices |
-| `DocumentFigureClassifier-v2.5` | 32 MB | Picture classification, all devices |
-| PyTorch CodeFormulaV2 | 610 MB | Formula enrichment on `cpu` (float32) and `cuda` (default dtype) only |
-| MLX CodeFormulaV2 | 611 MB | Formula enrichment on `mps` only, replacing the PyTorch model |
-| RapidOCR | 61 MB | OCR (downloaded only when `allow_ocr = true`) |
+Reply **approve** to accept the split, or describe changes for a new proposal.
+Planning and revising the split do not reconvert the PDF. Parsing happens only when
+you explicitly ask; questions about existing material do not trigger a new parse.
 
-The MLX weights are the community conversion `mlx-community/CodeFormulaV2-mlx-bf16`,
-not Granite Docling. Downloads pin revision `f29c446f17d772025137fabc11288f07769c316f`.
-The pin is enforced when downloading, not when loading an existing folder: pre-flight checks
-folder presence, not revision or file integrity. Existing model folders are skipped; to replace
-unverified weights, move their folder aside and re-run setup.
-`mlx-vlm` is a locked dependency installed only on Apple Silicon macOS.
+## ⬇️ Installation
 
-Docling chooses the OCR engine automatically.
-With the locked dependencies (no ocrmac, onnxruntime, or EasyOCR installed), it chooses RapidOCR with the torch backend, which `download-models` fetches when OCR is allowed.
+> You can ask your agent to read this README and help you complete the installation.
 
-This was verified with Docling 2.145 on Apple Silicon: both test fixture PDFs (one with a text layer and one image-only) converted with formula enrichment and OCR on.
-The Hugging Face hub was set to offline mode and its cache was empty.
-Docling finds the models only when it's given this download directory (`artifacts_path`).
-Otherwise it looks in the Hugging Face cache, which fails offline.
+Supported platforms: **Apple Silicon macOS** and **Linux (x86_64 and arm64)**.
+You need [uv](https://docs.astral.sh/uv/) and Python 3.12.
 
-## Errors
+### 1. Make the skill available to your agent
 
-Agent CLIs return a JSON error on stderr and exit with code 1.
+Download or clone this repository and register its root directory as a skill using
+your agent's skill-installation mechanism. The root contains [SKILL.md](SKILL.md),
+the agent's entry point. Keep the whole directory, including `scripts/` and `references/`.
 
-| Code | Meaning / fix |
-|---|---|
-| `settings_error` | Fix missing or invalid `settings.toml`, or choose an available device. |
-| `models_missing` | Required model folders are missing; run `uv run --project <skill-dir> download-models`. |
-| `conversion_failed` | Conversion failed; the material is marked failed. Retry with a new destination. |
+### 2. Install dependencies and create settings
 
-## Usage
-
-Agents run the CLIs from any working directory:
+Run these commands from the skill directory (the repository root):
 
 ```sh
-uv run --project <skill-dir> parse --help
-uv run --project <skill-dir> read --help
+uv sync
+cp settings.example.toml settings.toml
 ```
+
+### 3. Configure the skill
+
+Choose a directory for your library and create it. Replace `<library_root>` with your
+chosen path:
+
+```sh
+mkdir -p <library_root>
+```
+
+Edit `settings.toml` and set `library_root` to that same path. The path below is an
+example; these are all supported settings:
+
+```toml
+library_root = "~/course-library"
+device = "cpu"
+allow_ocr = true
+combined_read_max_chars = 60000
+```
+
+| Key | Required / default | Purpose |
+|---|---|---|
+| `library_root` | Required | Where parsed material is stored. Must be an absolute path to an existing directory; `~` is allowed. |
+| `device` | Required | Hardware for parsing: `"mps"` on Apple Silicon, `"cuda"` on Linux with an NVIDIA GPU, or `"cpu"` on any supported machine. Never selected automatically. |
+| `allow_ocr` | Optional; `true` | Permit OCR for scanned PDFs. Set to `false` to forbid it on this machine. |
+| `combined_read_max_chars` | Optional; `60000` | Character limit for a whole-chapter read before the agent must explicitly confirm that it needs the whole chapter. Individual reading units and slides are not limited. |
+
+### 4. Download models
+
+```sh
+uv run download-models
+```
+
+This downloads about **1.2 GB** of models, plus about **61 MB** when OCR is allowed.
+It validates your settings and device, skips models already present, and never deletes
+models. Re-run it after changing `device` or `allow_ocr`.
+
+You can now ask your agent to read material in your library or parse a new PDF.
+
+## Further documentation
+
+- [Configuration and runtime reference](docs/runtime-reference.md) — validation, devices,
+  model storage, OCR behavior, and setup errors.
+- [CLI reference](docs/cli-reference.md) — the `parse` and `read` tools supporting the skill.
+- [Domain glossary](GLOSSARY.md) — the vocabulary used throughout the project.
+- [Formula-engine decision](docs/adr/0001-formula-engines.md) — implementation rationale
+  and performance evidence.
+
+## 💭 Feedback and Contributing
+
+Found a bug, have a feature request, or want to suggest a documentation improvement?
+[Open an issue](https://github.com/chilfox/course-material-parser/issues).
