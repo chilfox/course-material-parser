@@ -79,6 +79,6 @@ also [recorded on #25](https://github.com/chilfox/course-material-parser/issues/
 accepts these 99 differences as a whole for substantial speed and agent readability.
 It supersedes exact parity and per-difference approval as release gates, not a claim
 that each formula is correct or equivalent. No CPU fallback remains unchanged.
-Detailed measurements, provenance, all mismatch pairs and methodology remain in
-the issues and external `/tmp/course-material-parser-25/26-notes.md`, `27-notes.md`
-and `27-comparison/` artifacts; no textbook or weights are committed.
+The measurements, comparison counts and limitations above are the maintained
+evidence for this decision; the linked issue comments record the acceptance.
+No textbook or model weights are committed.
