@@ -116,8 +116,8 @@ def load_settings(path: Path | None = None) -> Settings:
 def device_available(device: Device) -> bool:
     """Return whether PyTorch can use ``device`` on this machine.
 
-    Imports torch, which takes about half a second, so only ``parse`` calls this: the
-    reader never runs a model and must start fast.
+    Imports torch, which takes about half a second, so only parsing and model setup
+    call this: the reader never runs a model and must start fast.
     """
     if device == "cpu":
         return True

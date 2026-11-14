@@ -8,6 +8,10 @@ from course_material_parser.docling_conversion import Converted, DoclingConverte
 pytestmark = pytest.mark.docling
 
 
+def test_downloaded_models_cover_real_preflight():
+    assert DoclingConverter().missing_models(device="cpu", ocr=True) == []
+
+
 def test_real_docling_returns_a_document_with_page_provenance():
     outcome = DoclingConverter().convert(TEXT_LAYER_PDF, device="cpu", ocr=False)
 

@@ -6,11 +6,13 @@ from conftest import assert_error, start_parse, write_settings
 from course_material_parser import settings as settings_module
 
 
-@pytest.fixture(params=["parse", "read"])
-def run_any(request, run_parse, run_read):
+@pytest.fixture(params=["parse", "read", "download-models"])
+def run_any(request, run_parse, run_read, run_download):
     """Run each CLI's simplest command, so a case is checked against both CLIs."""
     if request.param == "parse":
         return lambda: start_parse(run_parse, dest="deck")
+    if request.param == "download-models":
+        return run_download
     return lambda: run_read("list")
 
 

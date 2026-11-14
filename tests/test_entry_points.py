@@ -8,7 +8,7 @@ import pytest
 SKILL_DIR = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("command", ["parse", "read"])
+@pytest.mark.parametrize("command", ["parse", "read", "download-models"])
 def test_cli_help_runs_from_an_unrelated_working_directory(command, tmp_path):
     result = subprocess.run(
         ["uv", "run", "--project", str(SKILL_DIR), command, "--help"],

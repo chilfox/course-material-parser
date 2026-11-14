@@ -8,7 +8,7 @@ import pypdfium2
 import pytest
 from docling_core.types.doc import DoclingDocument
 
-from course_material_parser import parse_command, read_command
+from course_material_parser import download_models_command, parse_command, read_command
 from course_material_parser.docling_conversion import (
     ConversionFailed,
     Converted,
@@ -53,6 +53,13 @@ class FakeConverter:
     failure: str | None = None
     partial: bool = False
     calls: list[dict] = field(default_factory=list)
+    missing: list[str] = field(default_factory=list)
+    model_checks: list[dict] = field(default_factory=list)
+
+    def missing_models(self, *, device: str, ocr: bool) -> list[str]:
+        """Record the pre-flight question and report configured missing models."""
+        self.model_checks.append({"device": device, "ocr": ocr})
+        return self.missing
 
     def convert(self, pdf: Path, *, device: str, ocr: bool):
         """Record the call and return the configured outcome without looking at the PDF."""
@@ -170,6 +177,19 @@ def run_parse(capsys, settings_path, converter):
     return _runner(
         capsys,
         lambda argv: parse_command.main(argv, settings_path=settings_path, converter=converter),
+    )
+
+
+@pytest.fixture
+def run_download(capsys, settings_path, tmp_path):
+    return _runner(
+        capsys,
+        lambda argv: download_models_command.main(
+            argv,
+            settings_path=settings_path,
+            model_directory=tmp_path / "models",
+            downloader=lambda model, directory: (directory / model.folder).mkdir(parents=True),
+        ),
     )
 
 

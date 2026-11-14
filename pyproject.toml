@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 parse = "course_material_parser.parse_command:main"
 read = "course_material_parser.read_command:main"
+download-models = "course_material_parser.download_models_command:main"
 
 [build-system]
 requires = ["uv_build>=0.13.3,<0.14.0"]

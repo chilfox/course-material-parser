@@ -36,7 +36,12 @@ from course_material_parser.material_store import (
 )
 from course_material_parser.page_spec import PAGES_HELP, parse_pages
 from course_material_parser.provenance import missing_provenance
-from course_material_parser.settings import Settings, load_settings, require_device_available
+from course_material_parser.settings import (
+    SKILL_DIR,
+    Settings,
+    load_settings,
+    require_device_available,
+)
 
 _DESCRIPTION = """\
 Convert a source PDF into parsed material stored under library_root.
@@ -251,6 +256,13 @@ def _start(args: argparse.Namespace, settings: Settings, converter: Converter | 
         from course_material_parser.docling_conversion import DoclingConverter
 
         converter = DoclingConverter()
+    missing = converter.missing_models(device=settings.device, ocr=bool(args.ocr))
+    if missing:
+        raise CliError(
+            "models_missing",
+            f"missing models: {'; '.join(missing)}; "
+            f"run uv run --project {SKILL_DIR} download-models",
+        )
     # Every refusal comes before anything is created, so a mistake changes nothing.
     material_store.check_destination(settings.library_root, args.dest)
     source: Path = args.pdf

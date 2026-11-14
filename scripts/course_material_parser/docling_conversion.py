@@ -2,7 +2,8 @@
 
 ``DoclingConverter`` turns a source PDF into a DoclingDocument with formula enrichment on,
 and reports success, failure, and partial conversion as distinct outcomes. Entry points
-accept any object with the same ``convert`` method, so tests inject a fake.
+accept any object with the same ``convert`` and ``missing_models`` methods, so tests
+inject a fake.
 ``save_document`` and ``load_document`` store a converted document as DoclingDocument JSON
 and load it back, so a textbook is split later without converting again.
 """
@@ -47,6 +48,10 @@ ConversionOutcome = Converted | PartiallyConverted | ConversionFailed
 class Converter(Protocol):
     """Anything that converts a source PDF into a ``ConversionOutcome``."""
 
+    def missing_models(self, *, device: str, ocr: bool) -> list[str]:
+        """Name required models absent from the local model directory."""
+        ...
+
     def convert(self, pdf: Path, *, device: str, ocr: bool) -> ConversionOutcome:
         """Convert ``pdf`` on ``device`` (``cpu``, ``mps``, or ``cuda``), with OCR if ``ocr``."""
         ...
@@ -66,13 +71,88 @@ def load_document(path: Path) -> DoclingDocument:
     return DoclingDocument.load_from_json(path)
 
 
+@dataclass(frozen=True)
+class Model:
+    """A model's human-readable name and folder in Docling's model directory."""
+
+    name: str
+    folder: str
+
+
+def required_models(*, device: str, ocr: bool) -> tuple[Model, ...]:
+    """Return the models conversion loads on ``device``, with OCR only if requested."""
+    # MPS still runs CodeFormulaV2 through Transformers on CPU.
+    models = (
+        Model("docling-layout-heron", "docling-project--docling-layout-heron"),
+        Model("TableFormer", "docling-project--docling-models"),
+        Model("DocumentFigureClassifier-v2.5", "docling-project--DocumentFigureClassifier-v2.5"),
+        Model("CodeFormulaV2", "docling-project--CodeFormulaV2"),
+    )
+    if ocr:
+        models += (Model("RapidOCR", "RapidOcr"),)
+    return models
+
+
+def models_directory() -> Path:
+    """Return the same directory used as conversion's ``artifacts_path``."""
+    from docling.datamodel.settings import settings as docling_settings
+
+    return docling_settings.cache_dir / "models"
+
+
+def download_model(model: Model, directory: Path) -> None:
+    """Fetch one model through Docling's downloaders, without deleting other models."""
+    from docling.datamodel.pipeline_options import LayoutObjectDetectionOptions
+    from docling.models.utils.hf_model_download import download_hf_model
+    from docling.utils.model_downloader import download_models
+
+    with _console_silenced():
+        if model.name == "docling-layout-heron":
+            spec = LayoutObjectDetectionOptions().model_spec
+            download_hf_model(
+                repo_id=spec.repo_id,
+                revision=spec.revision,
+                local_dir=directory / model.folder,
+                force=False,
+                progress=False,
+            )
+            return
+        download_models(
+            output_dir=directory,
+            with_layout=False,
+            with_tableformer=model.name == "TableFormer",
+            with_picture_classifier=model.name == "DocumentFigureClassifier-v2.5",
+            with_code_formula=model.name == "CodeFormulaV2",
+            with_rapidocr=model.name == "RapidOCR",
+            rapidocr_models=["torch:ch"] if model.name == "RapidOCR" else None,
+        )
+
+
 class DoclingConverter:
     """Convert PDFs with locally run Docling, loading models from the prefetched directory."""
+
+    def __init__(self, *, model_directory: Path | None = None) -> None:
+        """Use Docling's model directory unless a caller supplies another."""
+        self._model_directory = model_directory
+
+    @property
+    def model_directory(self) -> Path:
+        """The directory both pre-flight and conversion read."""
+        return self._model_directory if self._model_directory is not None else models_directory()
+
+    def missing_models(self, *, device: str, ocr: bool) -> list[str]:
+        """Name required models whose folders are absent."""
+        directory = self.model_directory
+        return [
+            model.name
+            for model in required_models(device=device, ocr=ocr)
+            if not (directory / model.folder).is_dir()
+        ]
 
     def convert(self, pdf: Path, *, device: str, ocr: bool) -> ConversionOutcome:
         """Convert ``pdf`` with formula enrichment on and return the outcome.
 
-        Models come from the ``docling-tools models download`` directory, so conversion
+        Models come from the ``download-models`` directory, so conversion
         works offline. With ``device = "mps"`` the formula model runs on CPU, because
         Docling doesn't support MPS for CodeFormulaV2. An exception raised inside Docling
         is reported as ``ConversionFailed``.
@@ -89,21 +169,22 @@ class DoclingConverter:
         from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
         from docling.datamodel.base_models import ConversionStatus, InputFormat
         from docling.datamodel.pipeline_options import CodeFormulaVlmOptions, PdfPipelineOptions
-        from docling.datamodel.settings import settings as docling_settings
         from docling.datamodel.vlm_engine_options import TransformersVlmEngineOptions
         from docling.document_converter import DocumentConverter, PdfFormatOption
 
         accelerator = AcceleratorDevice(device)
         options = PdfPipelineOptions(
-            artifacts_path=docling_settings.cache_dir / "models",
+            artifacts_path=self.model_directory,
             accelerator_options=AcceleratorOptions(device=accelerator),
             do_ocr=ocr,
             do_formula_enrichment=True,
         )
-        if accelerator is AcceleratorDevice.MPS:
+        if accelerator in (AcceleratorDevice.CPU, AcceleratorDevice.MPS):
             options.code_formula_options = CodeFormulaVlmOptions.from_preset(
                 "codeformulav2",
-                engine_options=TransformersVlmEngineOptions(device=AcceleratorDevice.CPU),
+                engine_options=TransformersVlmEngineOptions(
+                    device=AcceleratorDevice.CPU, torch_dtype="float32"
+                ),
             )
         converter = DocumentConverter(
             format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=options)}
