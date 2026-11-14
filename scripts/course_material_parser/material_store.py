@@ -149,6 +149,16 @@ def plan_snapshot(material_dir: Path) -> Path:
     return material_dir / _PLAN_FILE
 
 
+def split_proposal(material_dir: Path) -> Path:
+    """Return where the pending textbook's complete split proposal lives."""
+    return material_dir / "split-proposal.md"
+
+
+def write_split_proposal(material_dir: Path, proposal: str) -> None:
+    """Replace the complete split proposal using the snapshot's atomic write mechanism."""
+    write_atomically(split_proposal(material_dir), proposal.encode("utf-8"))
+
+
 def check_destination(library_root: Path, material_id: str) -> Path:
     """Check that ``material_id`` names a new material folder and return its path.
 
@@ -185,7 +195,7 @@ def check_destination(library_root: Path, material_id: str) -> Path:
             )
     path = library_root / material_id
     if path.exists() or path.is_symlink():
-        raise _destination_exists(material_id)
+        raise _destination_exists(material_id, path)
     return path
 
 
@@ -242,11 +252,16 @@ def create_destination(library_root: Path, material_id: str) -> Path:
         # Exclusive creation, so a folder appearing after any earlier check is still refused.
         path.mkdir()
     except FileExistsError:
-        raise _destination_exists(material_id) from None
+        raise _destination_exists(material_id, path) from None
     return path
 
 
-def _destination_exists(material_id: str) -> CliError:
+def _destination_exists(material_id: str, path: Path) -> CliError:
+    if path.is_dir() and not (path / _METADATA_FILE).exists():
+        return CliError(
+            "destination_exists",
+            f"{material_id} is an interrupted parse; delete it by hand or choose a new destination",
+        )
     return CliError("destination_exists", f"{material_id} already exists; choose a new destination")
 
 
@@ -273,10 +288,11 @@ def write_textbook_units(material_dir: Path, units: Iterable[tuple[UnitRecord, s
         path.write_text(markdown, encoding="utf-8")
 
 
-def remove_extraction_and_snapshot(material_dir: Path) -> None:
-    """Delete a finalized textbook's stored extraction and plan snapshot."""
+def remove_pending_artifacts(material_dir: Path) -> None:
+    """Delete a finalized textbook's extraction, plan snapshot and split proposal."""
     extraction_json(material_dir).unlink(missing_ok=True)
     plan_snapshot(material_dir).unlink(missing_ok=True)
+    split_proposal(material_dir).unlink(missing_ok=True)
 
 
 def read_plan_snapshot(material_dir: Path) -> object | None:

@@ -17,6 +17,10 @@ The readable representation of a source PDF, including its text, structure, and 
 **Split plan**:
 A proposed organization of a textbook's content into chapters and reading units for separate reading, by source-page range. Its units nest under their chapters in reading order, and it names the extraction it was written for. Proposing it saves a snapshot, which is what the user approves.
 
+**Split proposal**:
+The message that presents a proposed split plan to the user in a fixed form and asks for approval; its complete form is also kept as a file in the pending material. Any change to the split plan needs a new split proposal and a new approval.
+_Avoid_: split plan (for the message)
+
 **Extraction**:
 The stored result of converting a textbook once, kept while the textbook is pending so its split can be planned and applied without converting again. Its extraction id ties a split plan to exactly this extraction.
 

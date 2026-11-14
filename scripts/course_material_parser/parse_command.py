@@ -88,8 +88,14 @@ Running headers and footers are left out of both."""
 _PROPOSE_DESCRIPTION = """\
 Validate the split plan at PATH for a pending textbook and save a snapshot of it in the
 material. Every problem is reported at once as invalid_plan; the material stays pending
-and a previous snapshot is kept. A valid plan replaces any previous snapshot and returns
-a summary for the approval request: contents with ids, titles, and pages, and overlaps.
+and the previous snapshot and split proposal file are kept. A valid plan replaces the
+snapshot and writes the complete split proposal to split-proposal.md in the material.
+
+Returns one JSON line with source (material id), pdf (source filename), pages,
+proposal (absolute file path), chapters and units (counts), overlaps (shared-page count), and
+overview (text to show the user unchanged). The overview is the complete proposal when
+the tree fits in 40 lines; otherwise it includes the first 40 tree lines and a link to
+the complete file. Add limitations only when relevant and ask for approval.
 
 Plan file (every field required, no others allowed):
   {"version": 1, "extraction_id": "<from inspect>", "contents": [
@@ -376,12 +382,23 @@ def _propose(settings: Settings, material_id: str, plan_path: Path) -> dict:
         page_count=record.pages,
         extraction_id=record.extraction_id,
     )
+    proposal_path = material_store.split_proposal(material.path).resolve()
+    complete, overview = split_plan.render_proposal(
+        plan,
+        material_id=material_id,
+        source_filename=record.source_filename,
+        pages=record.pages,
+        proposal_path=str(proposal_path),
+    )
     material_store.write_plan_snapshot(material.path, split_plan.plan_json(plan))
+    material_store.write_split_proposal(material.path, complete)
     return {
         "source": material_id,
         "pdf": record.source_filename,
         "pages": record.pages,
-        **split_plan.summary(plan),
+        "proposal": str(proposal_path),
+        **split_plan.counts(plan),
+        "overview": overview,
     }
 
 
@@ -428,7 +445,7 @@ def _finalize(settings: Settings, material_id: str, *, confirm: bool) -> dict:
             units=tuple(unit for unit, _selector in units),
         ),
     )
-    material_store.remove_extraction_and_snapshot(material.path)
+    material_store.remove_pending_artifacts(material.path)
     return {
         "source": material_id,
         "type": record.type,

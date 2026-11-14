@@ -52,8 +52,8 @@ def propose(run_parse, tmp_path, plan):
     return run_parse("propose", "--dest", DEST, "--plan", str(path))
 
 
-def test_a_valid_plan_returns_the_approval_summary_with_overlap_pages(
-    run_parse, tmp_path, extraction_id
+def test_a_valid_plan_returns_and_stores_the_split_proposal(
+    run_parse, tmp_path, library, extraction_id
 ):
     result = propose(run_parse, tmp_path, valid_plan(extraction_id))
 
@@ -62,25 +62,133 @@ def test_a_valid_plan_returns_the_approval_summary_with_overlap_pages(
         "source": DEST,
         "pdf": "prml.pdf",
         "pages": 10,
-        "contents": [
-            {"id": "front-matter", "title": "Front matter", "pages": [1, 1]},
-            {
-                "id": "chapter-01",
-                "title": "Introduction",
-                "pages": [2, 8],
-                "units": [
-                    {"id": "1-1", "title": "Curve Fitting", "pages": [2, 4]},
-                    {"id": "1-2", "title": "Probability", "pages": [4, 8]},
-                ],
-            },
-            {"id": "references", "title": "References", "pages": [9, 10]},
-        ],
-        "overlaps": [{"page": 4, "units": ["1-1", "1-2"]}],
+        "proposal": str(library / DEST / "split-proposal.md"),
+        "chapters": 1,
+        "units": 4,
+        "overlaps": 1,
+        "overview": (
+            "## Split proposal: ml/prml\n"
+            "Source: prml.pdf, 10 pages (PDF pages)\n\n"
+            "```\n"
+            "front-matter  Front matter   1-1\n"
+            "chapter-01    Introduction   2-8\n"
+            "├─ 1-1        Curve Fitting  2-4\n"
+            "└─ 1-2        Probability    4-8\n"
+            "references    References     9-10\n"
+            "```\n\n"
+            "Overlaps: p.4: 1-1/1-2\n"
+        ),
     }
+    assert (library / DEST / "split-proposal.md").read_text() == result.json["overview"]
 
 
 def snapshot(library):
     return json.loads((library / DEST / "plan.json").read_text())
+
+
+def test_multiline_titles_render_as_single_aligned_tree_rows(
+    run_parse, tmp_path, library, extraction_id
+):
+    plan = valid_plan(extraction_id)
+    plan["contents"] = [plan_unit("whole", "Whole" + "\n" * 41 + "book", 1, PAGES)]
+
+    result = propose(run_parse, tmp_path, plan)
+
+    assert result.exit_code == 0, result.stderr
+    expected = (
+        "## Split proposal: ml/prml\n"
+        "Source: prml.pdf, 10 pages (PDF pages)\n\n"
+        "```\nwhole  Whole book  1-10\n```\n\nOverlaps: none\n"
+    )
+    assert result.json["overview"] == expected
+    assert (library / DEST / "split-proposal.md").read_text() == expected
+    assert snapshot(library) == plan
+
+
+@pytest.mark.parametrize("tree_lines", [40, 41])
+def test_overview_uses_the_complete_tree_or_its_first_40_lines(
+    run_parse, tmp_path, library, extraction_id, tree_lines
+):
+    plan = valid_plan(extraction_id)
+    plan["contents"] = [
+        {
+            "id": "chapter-01",
+            "title": "Introduction",
+            "units": [
+                plan_unit(
+                    f"unit-{i}",
+                    "A much longer final title" if i == tree_lines - 3 else "Section",
+                    1,
+                    1,
+                )
+                for i in range(tree_lines - 2)
+            ]
+            + [plan_unit("last", "Last", 1, PAGES)],
+        }
+    ]
+
+    result = propose(run_parse, tmp_path, plan)
+
+    assert result.exit_code == 0, result.stderr
+    path = library / DEST / "split-proposal.md"
+    complete = path.read_text()
+    tree = complete.split("```\n")[1].splitlines()
+    assert len(tree) == tree_lines
+    assert result.json["proposal"] == str(path)
+    assert result.json["chapters"] == 1
+    assert result.json["units"] == tree_lines - 1
+    overview = result.json["overview"]
+    if tree_lines == 40:
+        assert overview == complete
+        assert "Full proposal:" not in overview
+    else:
+        assert overview.split("```\n")[1].splitlines() == tree[:40] + ["..."]
+        assert f"```\n\nFull proposal: {path}\n\nOverlaps:" in overview
+        assert overview.split("Overlaps:")[1] == complete.split("Overlaps:")[1]
+        assert "..." not in complete
+
+
+@pytest.mark.parametrize("shared_pages", [0, 10, 11])
+def test_overlaps_lists_up_to_ten_shared_pages_then_only_the_count(
+    run_parse, tmp_path, library, converter, shared_pages
+):
+    pages = 12
+    converter.document = blank_document(pages)
+    started = start_parse(
+        run_parse,
+        "--no-ocr",
+        dest=DEST,
+        material_type="textbook",
+        pdf=blank_pdf(tmp_path / "book.pdf", pages),
+    )
+    units = (
+        [plan_unit("only", "Whole book", 1, pages)]
+        if shared_pages == 0
+        else [plan_unit("first", "First", 1, 1)]
+        + [plan_unit(f"unit-{i}", "Section", i, i + 1) for i in range(1, shared_pages)]
+        + [plan_unit("last", "Last", shared_pages, pages)]
+    )
+    plan = {"version": 1, "extraction_id": started.json["extraction_id"], "contents": units}
+
+    result = propose(run_parse, tmp_path, plan)
+
+    assert result.exit_code == 0, result.stderr
+    assert result.json["overlaps"] == shared_pages
+    assert result.json["chapters"] == 0
+    assert result.json["units"] == (1 if shared_pages == 0 else shared_pages + 1)
+    if shared_pages == 0:
+        expected = "Overlaps: none\n"
+    elif shared_pages == 10:
+        expected = (
+            "Overlaps: p.1: first/unit-1; p.2: unit-1/unit-2; p.3: unit-2/unit-3; "
+            "p.4: unit-3/unit-4; p.5: unit-4/unit-5; p.6: unit-5/unit-6; "
+            "p.7: unit-6/unit-7; p.8: unit-7/unit-8; p.9: unit-8/unit-9; "
+            "p.10: unit-9/last\n"
+        )
+    else:
+        expected = "Overlaps: 11 boundary pages shared by adjacent units (visible in the ranges)\n"
+    assert result.json["overview"].endswith(expected)
+    assert (library / DEST / "split-proposal.md").read_text().endswith(expected)
 
 
 def test_a_valid_plan_is_snapshotted_into_the_pending_material(
@@ -101,7 +209,8 @@ def test_proposing_again_replaces_the_snapshot(run_parse, tmp_path, library, ext
 
     result = propose(run_parse, tmp_path, revised)
 
-    assert result.json["contents"][0]["title"] == "Preface"
+    assert "Preface" in result.json["overview"]
+    assert (library / DEST / "split-proposal.md").read_text() == result.json["overview"]
     assert snapshot(library) == revised
 
 
@@ -110,6 +219,11 @@ def test_an_invalid_plan_reports_every_problem_at_once_and_changes_nothing(
 ):
     approved = valid_plan(extraction_id)
     propose(run_parse, tmp_path, approved)
+    before = {
+        path.relative_to(library): path.read_bytes()
+        for path in library.rglob("*")
+        if path.is_file()
+    }
     plan = valid_plan(extraction_id)
     plan["contents"][0]["selector"]["start"] = 2
     plan["contents"][1]["units"][1]["selector"].update(start=8, end=6)
@@ -123,6 +237,11 @@ def test_an_invalid_plan_reports_every_problem_at_once_and_changes_nothing(
     ]
     assert material_status(library, DEST) == "pending"
     assert snapshot(library) == approved
+    assert {
+        path.relative_to(library): path.read_bytes()
+        for path in library.rglob("*")
+        if path.is_file()
+    } == before
 
 
 def _parent(plan, path):
@@ -251,7 +370,8 @@ def test_several_units_may_share_one_page_and_each_shared_page_is_one_overlap(
     result = propose(run_parse, tmp_path, plan)
 
     assert result.exit_code == 0, result.stderr
-    assert result.json["overlaps"] == [{"page": 4, "units": ["1-intro", "1-1", "1-2"]}]
+    assert result.json["overlaps"] == 1
+    assert "Overlaps: p.4: 1-intro/1-1/1-2\n" in result.json["overview"]
 
 
 def test_proposing_for_ready_slides_is_refused(run_parse, tmp_path):
@@ -271,6 +391,8 @@ def test_propose_help_documents_the_plan_file_and_its_rules(run_parse):
 
     assert result.exit_code == 0
     for fragment in ('"extraction_id"', '"units"', '"pdf_pages"', "boundary page"):
+        assert fragment in result.stdout
+    for fragment in ("split-proposal.md", "path", "counts", "overview", "unchanged"):
         assert fragment in result.stdout
     assert "propose" in run_parse("--help").stdout
 

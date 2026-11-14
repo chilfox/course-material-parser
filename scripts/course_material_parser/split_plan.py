@@ -359,26 +359,65 @@ def _unit_json(unit: Unit) -> dict:
     }
 
 
-def summary(plan: SplitPlan) -> dict:
-    """Return the plan as an approval summary: ``contents`` like ``read toc``, and overlaps.
+def render_proposal(
+    plan: SplitPlan, *, material_id: str, source_filename: str, pages: int, proposal_path: str
+) -> tuple[str, str]:
+    """Render a validated plan as the complete split proposal and its chat overview.
 
-    Each unit has ``pages`` ``[start, end]``; a chapter's ``pages`` span its units.
-    ``overlaps`` lists every boundary page shared by adjacent units, with the ids of all
-    the units on it in reading order.
+    Columns align across the complete tree, including in a truncated overview.
+    Neither text includes limitations or an approval question: the agent adds those.
     """
-    contents = []
+    rows: list[tuple[str, str, str]] = []
     for entry in plan.contents:
         if isinstance(entry, Chapter):
-            units = [_unit_summary(unit) for unit in entry.units]
-            pages = [entry.units[0].first_page, entry.units[-1].last_page]
-            contents.append({"id": entry.id, "title": entry.title, "pages": pages, "units": units})
+            rows.append(
+                (entry.id, entry.title, f"{entry.units[0].first_page}-{entry.units[-1].last_page}")
+            )
+            for index, unit in enumerate(entry.units):
+                branch = "└─" if index == len(entry.units) - 1 else "├─"
+                rows.append(
+                    (f"{branch} {unit.id}", unit.title, f"{unit.first_page}-{unit.last_page}")
+                )
         else:
-            contents.append(_unit_summary(entry))
-    return {"contents": contents, "overlaps": _overlaps(plan)}
+            rows.append((entry.id, entry.title, f"{entry.first_page}-{entry.last_page}"))
+    # Titles remain verbatim in the plan, but whitespace must not create extra tree rows.
+    rows = [(id_, " ".join(title.split()), span) for id_, title, span in rows]
+    id_width = max(len(row[0]) for row in rows)
+    title_width = max(len(row[1]) for row in rows)
+    tree = [f"{id_:<{id_width}}  {title:<{title_width}}  {span}" for id_, title, span in rows]
+    header = (
+        f"## Split proposal: {material_id}\n"
+        f"Source: {source_filename}, {pages} pages (PDF pages)\n\n```\n"
+    )
+    overlaps = _overlaps(plan)
+    overlap_line = "Overlaps: " + (
+        "; ".join(f"p.{item['page']}: {'/'.join(item['units'])}" for item in overlaps)
+        if overlaps
+        else "none"
+    )
+    if len(overlaps) > 10:
+        overlap_line = (
+            f"Overlaps: {len(overlaps)} boundary pages shared by adjacent units "
+            "(visible in the ranges)"
+        )
+    complete = header + "\n".join(tree) + f"\n```\n\n{overlap_line}\n"
+    if len(tree) <= 40:
+        return complete, complete
+    overview = (
+        header
+        + "\n".join(tree[:40])
+        + f"\n...\n```\n\nFull proposal: {proposal_path}\n\n{overlap_line}\n"
+    )
+    return complete, overview
 
 
-def _unit_summary(unit: Unit) -> dict:
-    return {"id": unit.id, "title": unit.title, "pages": [unit.first_page, unit.last_page]}
+def counts(plan: SplitPlan) -> dict[str, int]:
+    """Return chapter, reading-unit and shared boundary-page counts for a valid plan."""
+    return {
+        "chapters": sum(isinstance(entry, Chapter) for entry in plan.contents),
+        "units": sum(1 for _ in plan.units()),
+        "overlaps": len(_overlaps(plan)),
+    }
 
 
 def _overlaps(plan: SplitPlan) -> list[dict]:

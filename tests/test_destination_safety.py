@@ -2,7 +2,13 @@
 
 import pytest
 
-from conftest import TEXT_LAYER_PDF, assert_error, material_status, start_parse
+from conftest import (
+    TEXT_LAYER_PDF,
+    assert_error,
+    material_status,
+    set_material_status,
+    start_parse,
+)
 from course_material_parser import pdf
 
 
@@ -14,25 +20,53 @@ def snapshot(root):
     }
 
 
-def test_an_existing_empty_destination_is_refused_and_left_untouched(run_parse, library):
-    (library / "ml" / "prml").mkdir(parents=True)
+@pytest.mark.parametrize("leftover", [None, "source.pdf", "contents", "notes.txt"])
+def test_an_interrupted_destination_is_refused_with_recovery_guidance(
+    run_parse, library, converter, leftover
+):
+    destination = library / "ml" / "prml"
+    destination.mkdir(parents=True)
+    if leftover == "contents":
+        (destination / leftover).mkdir()
+    elif leftover is not None:
+        (destination / leftover).write_bytes(b"keep me")
     before = snapshot(library)
 
     result = start_parse(run_parse, dest="ml/prml")
 
     assert_error(result, "destination_exists")
-    assert "ml/prml" in result.error["message"]
+    assert result.error["message"] == (
+        "ml/prml is an interrupted parse; delete it by hand or choose a new destination"
+    )
     assert snapshot(library) == before
+    assert converter.calls == []
 
 
-def test_an_existing_material_is_refused_and_left_untouched(run_parse, library):
+@pytest.mark.parametrize("status", ["ready", "pending", "failed"])
+def test_an_existing_material_is_refused_and_left_untouched(run_parse, library, converter, status):
     assert start_parse(run_parse, dest="ml/deck").exit_code == 0
+    set_material_status(library, "ml/deck", status)
     before = snapshot(library)
+    converter.calls.clear()
 
     result = start_parse(run_parse, dest="ml/deck")
 
     assert_error(result, "destination_exists")
+    assert result.error["message"] == "ml/deck already exists; choose a new destination"
     assert snapshot(library) == before
+    assert converter.calls == []
+
+
+def test_an_existing_file_is_refused_and_left_untouched(run_parse, library, converter):
+    (library / "deck").write_bytes(b"keep me")
+    before = snapshot(library)
+
+    result = start_parse(run_parse, dest="deck")
+
+    assert_error(result, "destination_exists")
+    assert result.error["message"] == "deck already exists; choose a new destination"
+    assert snapshot(library) == before
+    assert converter.calls == []
 
 
 def test_a_destination_appearing_after_the_preliminary_check_is_refused(
@@ -53,7 +87,11 @@ def test_a_destination_appearing_after_the_preliminary_check_is_refused(
     result = start_parse(run_parse, dest="ml/deck")
 
     assert_error(result, "destination_exists")
+    assert result.error["message"] == (
+        "ml/deck is an interrupted parse; delete it by hand or choose a new destination"
+    )
     assert snapshot(library / "ml" / "deck") == {"theirs.txt": b"keep me"}
+    assert converter.calls == []
 
 
 @pytest.mark.parametrize(
