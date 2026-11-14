@@ -68,7 +68,7 @@ uv run --project <skill-dir> parse propose --dest MATERIAL --plan PATH
 
 ## 6. Ask for approval
 
-Show the user the `overview` from a valid `propose` unchanged.
+Show the user the `overview` field of the `propose` output unchanged: it is the split proposal, with the tree cut to 40 lines and a link to the complete file when longer.
 Add `Limitations: ...` only when it affects the decision, and end with:
 
 Reply approve, or describe changes.

@@ -92,13 +92,22 @@ def test_a_huge_out_of_range_page_range_is_refused_without_expanding_it(run_pars
     assert result.error["message"] == "pages out of range: ml/week3-slides has pages 1-2"
 
 
-def test_get_help_holds_the_selector_rules_and_the_marker_legend(run_read):
+def test_get_help_holds_the_selector_rules_and_points_to_the_marker_legend(run_read):
     result = run_read("get", "--help")
 
     assert result.exit_code == 0
     help_text = " ".join(result.stdout.split())
     assert "--pages" in help_text and "--id" in help_text
+    assert "too_large" in help_text
+    assert "explained in `read --help`" in help_text
+    assert "<visual>" not in help_text
+
+
+def test_read_help_holds_the_marker_legend(run_read):
+    result = run_read("--help")
+
+    assert result.exit_code == 0
+    help_text = " ".join(result.stdout.split())
     assert "<page N> the content below comes from source-PDF page N" in help_text
     assert "<visual> an image was here, followed by its caption if detected" in help_text
     assert "Render that page only if the content can't be understood without it" in help_text
-    assert "too_large" in help_text

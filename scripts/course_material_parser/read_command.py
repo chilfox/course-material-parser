@@ -26,6 +26,12 @@ Read parsed material stored under library_root.
 MATERIAL is the material's folder path under library_root, for example ml/prml.
 Page numbers are always source-PDF pages counted from 1, not printed page numbers.
 
+Markers in the Markdown printed by get:
+  <page N>  the content below comes from source-PDF page N.
+  <visual>  an image was here, followed by its caption if detected. Usually the text
+            is enough. Render that page only if the content can't be understood
+            without it.
+
 commands:
   list    list ready materials, optionally under a PREFIX folder
   toc     show a material's table of contents
@@ -49,11 +55,7 @@ Selectors:
   too_large; re-run with --confirm only if the whole chapter is needed. --confirm is
   ignored for units and slides.
 
-Markers in the Markdown:
-  <page N>  the content below comes from source-PDF page N.
-  <visual>  an image was here, followed by its caption if detected. Usually the text
-            is enough. Render that page only if the content can't be understood
-            without it."""
+Markers in the Markdown are explained in `read --help`."""
 
 _RENDER_DESCRIPTION = """\
 Render source pages of a material to PNG and print their files as JSON. The files are
