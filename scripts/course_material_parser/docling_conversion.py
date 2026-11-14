@@ -14,6 +14,7 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Protocol
 
@@ -75,10 +76,22 @@ MLX_FORMULA_REPO = "mlx-community/CodeFormulaV2-mlx-bf16"
 MLX_FORMULA_REVISION = "f29c446f17d772025137fabc11288f07769c316f"
 
 
+class ModelId(Enum):
+    """Stable model identities, independent of their human-readable labels."""
+
+    LAYOUT = "layout"
+    TABLE = "table"
+    PICTURE_CLASSIFIER = "picture_classifier"
+    FORMULA = "formula"
+    MLX_FORMULA = "mlx_formula"
+    OCR = "ocr"
+
+
 @dataclass(frozen=True)
 class Model:
-    """A model's human-readable name and folder in Docling's model directory."""
+    """A model's stable identity, display name, and local/download location."""
 
+    identity: ModelId
     name: str
     folder: str
     repo_id: str | None = None
@@ -89,22 +102,27 @@ def required_models(*, device: str, ocr: bool) -> tuple[Model, ...]:
     """Return the models conversion loads on ``device``, with OCR only if requested."""
     formula = (
         Model(
+            ModelId.MLX_FORMULA,
             "CodeFormulaV2 (MLX)",
             MLX_FORMULA_REPO.replace("/", "--"),
             MLX_FORMULA_REPO,
             MLX_FORMULA_REVISION,
         )
         if device == "mps"
-        else Model("CodeFormulaV2", "docling-project--CodeFormulaV2")
+        else Model(ModelId.FORMULA, "CodeFormulaV2", "docling-project--CodeFormulaV2")
     )
     models = (
-        Model("docling-layout-heron", "docling-project--docling-layout-heron"),
-        Model("TableFormer", "docling-project--docling-models"),
-        Model("DocumentFigureClassifier-v2.5", "docling-project--DocumentFigureClassifier-v2.5"),
+        Model(ModelId.LAYOUT, "docling-layout-heron", "docling-project--docling-layout-heron"),
+        Model(ModelId.TABLE, "TableFormer", "docling-project--docling-models"),
+        Model(
+            ModelId.PICTURE_CLASSIFIER,
+            "DocumentFigureClassifier-v2.5",
+            "docling-project--DocumentFigureClassifier-v2.5",
+        ),
         formula,
     )
     if ocr:
-        models += (Model("RapidOCR", "RapidOcr"),)
+        models += (Model(ModelId.OCR, "RapidOCR", "RapidOcr"),)
     return models
 
 
@@ -131,7 +149,7 @@ def download_model(model: Model, directory: Path) -> None:
                 local_dir=directory / model.folder,
             )
             return
-        if model.name == "docling-layout-heron":
+        if model.identity is ModelId.LAYOUT:
             spec = LayoutObjectDetectionOptions().model_spec
             download_hf_model(
                 repo_id=spec.repo_id,
@@ -144,11 +162,11 @@ def download_model(model: Model, directory: Path) -> None:
         download_models(
             output_dir=directory,
             with_layout=False,
-            with_tableformer=model.name == "TableFormer",
-            with_picture_classifier=model.name == "DocumentFigureClassifier-v2.5",
-            with_code_formula=model.name == "CodeFormulaV2",
-            with_rapidocr=model.name == "RapidOCR",
-            rapidocr_models=["torch:ch"] if model.name == "RapidOCR" else None,
+            with_tableformer=model.identity is ModelId.TABLE,
+            with_picture_classifier=model.identity is ModelId.PICTURE_CLASSIFIER,
+            with_code_formula=model.identity is ModelId.FORMULA,
+            with_rapidocr=model.identity is ModelId.OCR,
+            rapidocr_models=["torch:ch"] if model.identity is ModelId.OCR else None,
         )
 
 

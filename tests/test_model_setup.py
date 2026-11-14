@@ -1,6 +1,7 @@
 """CLI seams for offline model setup and pre-flight refusals."""
 
 import sys
+from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +9,7 @@ import pytest
 from conftest import assert_error, start_parse, write_settings
 from course_material_parser import download_models_command
 from course_material_parser import settings as settings_module
-from course_material_parser.docling_conversion import DoclingConverter
+from course_material_parser.docling_conversion import DoclingConverter, download_model
 
 
 @pytest.mark.parametrize(
@@ -109,6 +110,78 @@ def test_download_and_preflight_agree_on_exact_models(
     for name in expected:
         assert f"Skipped {name} (already present)" in output.out
     assert unrelated.read_bytes() == b"keep these weights"
+
+
+@pytest.mark.parametrize("device", ["cpu", "mps"])
+def test_download_dispatch_is_independent_of_display_names(
+    device, settings_path, library, tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(settings_module, "device_available", lambda device: True)
+    monkeypatch.setitem(sys.modules, "mlx_vlm", SimpleNamespace())
+    write_settings(settings_path, library, "allow_ocr = true\n", device=device)
+    requests = []
+    spec = SimpleNamespace(repo_id="layout-repo", revision="layout-revision")
+    for module, exports in {
+        "docling.datamodel.pipeline_options": {
+            "LayoutObjectDetectionOptions": lambda: SimpleNamespace(model_spec=spec)
+        },
+        "docling.models.utils.hf_model_download": {
+            "download_hf_model": lambda **kwargs: requests.append(("layout", kwargs))
+        },
+        "docling.utils.model_downloader": {
+            "download_models": lambda **kwargs: requests.append(("docling", kwargs))
+        },
+        "huggingface_hub": {"snapshot_download": lambda **kwargs: requests.append(("mlx", kwargs))},
+    }.items():
+        monkeypatch.setitem(sys.modules, module, SimpleNamespace(**exports))
+    directory = tmp_path / "models"
+
+    code = download_models_command.main(
+        [],
+        settings_path=settings_path,
+        model_directory=directory,
+        downloader=lambda model, target: download_model(
+            replace(model, name="A revised display label"), target
+        ),
+    )
+
+    assert code == 0, capsys.readouterr().err
+    assert requests[0] == (
+        "layout",
+        dict(
+            repo_id="layout-repo",
+            revision="layout-revision",
+            local_dir=directory / "docling-project--docling-layout-heron",
+            force=False,
+            progress=False,
+        ),
+    )
+    expected_flags = [(True, False, False, False), (False, True, False, False)]
+    if device == "cpu":
+        expected_flags.append((False, False, True, False))
+    expected_flags.append((False, False, False, True))
+    docling_requests = [kwargs for kind, kwargs in requests if kind == "docling"]
+    assert docling_requests == [
+        dict(
+            output_dir=directory,
+            with_layout=False,
+            with_tableformer=table,
+            with_picture_classifier=picture,
+            with_code_formula=formula,
+            with_rapidocr=ocr,
+            rapidocr_models=["torch:ch"] if ocr else None,
+        )
+        for table, picture, formula, ocr in expected_flags
+    ]
+    if device == "mps":
+        assert requests[3] == (
+            "mlx",
+            dict(
+                repo_id="mlx-community/CodeFormulaV2-mlx-bf16",
+                revision="f29c446f17d772025137fabc11288f07769c316f",
+                local_dir=directory / "mlx-community--CodeFormulaV2-mlx-bf16",
+            ),
+        )
 
 
 @pytest.mark.parametrize("command", ["parse", "download-models"])
