@@ -41,9 +41,10 @@ The configured `device` decides what is used.
 It is never chosen automatically:
 
 - `mps` on Apple Silicon.
-  Docling doesn't support MPS for the formula model (CodeFormulaV2), so that model always runs on CPU there.
-  The formula model uses float32; table structure also runs on CPU (an upstream limitation).
-  Other stages use MPS.
+  The formula model (CodeFormulaV2) runs on the GPU through Docling's MLX engine.
+  Table structure still runs on CPU (an upstream limitation); other stages use MPS.
+  An unavailable `mlx-vlm` runtime is a `settings_error`: run `uv sync` on Apple Silicon macOS.
+  Missing MLX weights are `models_missing`. Neither condition falls back to CPU.
 - `cuda` on Linux with an NVIDIA GPU.
   Linux uses the default PyPI PyTorch build.
 - `cpu` works everywhere. The formula model uses float32 to avoid slow CPU bfloat16 inference.
@@ -53,7 +54,7 @@ On `cuda`, the formula model keeps Docling's default dtype.
 ## Models
 
 `download-models` reads `device` and `allow_ocr` from `settings.toml` and downloads only the
-models they need (about 1.2 GB without OCR). Models go to Docling's `cache_dir/models`, normally
+models they need (about 1.2 GB without OCR, for either formula engine). Models go to Docling's `cache_dir/models`, normally
 `~/.cache/docling/models`; `DOCLING_CACHE_DIR` overrides the cache directory. Conversion reads
 that same directory, so parsing needs no network after setup.
 
@@ -62,13 +63,21 @@ From any working directory, run `uv run --project <skill-dir> download-models`.
 checks. Missing folders are reported without creating an interrupted parse or failed material.
 RapidOCR is checked only for a parse with `--ocr`.
 
-| Model | Used for |
-|---|---|
-| `docling-layout-heron` | Page layout |
-| TableFormer (`docling-models`) | Table structure |
-| `DocumentFigureClassifier-v2.5` | Picture classification |
-| CodeFormulaV2 | Formula enrichment (LaTeX) |
-| RapidOCR | OCR (downloaded only when `allow_ocr = true`) |
+| Model | Approximate size | Used for |
+|---|---|---|
+| `docling-layout-heron` | 164 MB | Page layout, all devices |
+| TableFormer (`docling-models`) | 342 MB | Table structure, all devices |
+| `DocumentFigureClassifier-v2.5` | 32 MB | Picture classification, all devices |
+| PyTorch CodeFormulaV2 | 610 MB | Formula enrichment on `cpu` (float32) and `cuda` (default dtype) only |
+| MLX CodeFormulaV2 | 611 MB | Formula enrichment on `mps` only, replacing the PyTorch model |
+| RapidOCR | 61 MB | OCR (downloaded only when `allow_ocr = true`) |
+
+The MLX weights are the community conversion `mlx-community/CodeFormulaV2-mlx-bf16`,
+not Granite Docling. Downloads pin revision `f29c446f17d772025137fabc11288f07769c316f`.
+The pin is enforced when downloading, not when loading an existing folder: pre-flight checks
+folder presence, not revision or file integrity. Existing model folders are skipped; to replace
+unverified weights, move their folder aside and re-run setup.
+`mlx-vlm` is a locked dependency installed only on Apple Silicon macOS.
 
 Docling chooses the OCR engine automatically.
 With the locked dependencies (no ocrmac, onnxruntime, or EasyOCR installed), it chooses RapidOCR with the torch backend, which `download-models` fetches when OCR is allowed.

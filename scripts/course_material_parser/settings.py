@@ -5,8 +5,10 @@ any working directory. Callers (tests) can inject another path. Every mistake is
 ``settings_error`` whose message says what to fix.
 """
 
+import io
 import tomllib
 from collections.abc import Callable
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import MISSING, dataclass, field, fields
 from pathlib import Path
 from typing import Any, Literal, get_args
@@ -139,3 +141,13 @@ def require_device_available(settings: Settings) -> None:
             f"device {settings.device!r} is not available on this machine; "
             "set device to one that is (cpu always works)"
         )
+    if settings.device == "mps":
+        try:
+            # Runtime imports may print warnings; preserve the CLI's JSON contract.
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                import mlx_vlm  # noqa: F401
+        except Exception as error:
+            raise _error(
+                "device 'mps' requires an importable mlx-vlm runtime; run uv sync "
+                f"on Apple Silicon macOS ({type(error).__name__}: {error})"
+            ) from None

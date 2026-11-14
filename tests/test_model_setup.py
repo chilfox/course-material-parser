@@ -1,5 +1,8 @@
 """CLI seams for offline model setup and pre-flight refusals."""
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 
 from conftest import assert_error, start_parse, write_settings
@@ -8,14 +11,20 @@ from course_material_parser import settings as settings_module
 from course_material_parser.docling_conversion import DoclingConverter
 
 
+@pytest.mark.parametrize(
+    "device,formula", [("cpu", "CodeFormulaV2"), ("mps", "CodeFormulaV2 (MLX)")]
+)
 def test_missing_models_refuse_before_destination_checks_without_creating_anything(
-    run_parse, converter, library
+    device, formula, run_parse, converter, library, settings_path, monkeypatch
 ):
-    converter.missing = ["CodeFormulaV2", "RapidOCR"]
+    monkeypatch.setattr(settings_module, "device_available", lambda device: True)
+    monkeypatch.setitem(sys.modules, "mlx_vlm", SimpleNamespace())
+    write_settings(settings_path, library, device=device)
+    converter.missing = [formula, "RapidOCR"]
 
     result = start_parse(run_parse, dest="../invalid")
 
-    assert_error(result, "models_missing", "CodeFormulaV2", "RapidOCR", "download-models")
+    assert_error(result, "models_missing", formula, "RapidOCR", "download-models")
     assert converter.calls == []
     assert list(library.iterdir()) == []
 
@@ -45,12 +54,13 @@ def test_download_and_preflight_agree_on_exact_models(
     device, allow_ocr, settings_path, library, tmp_path, monkeypatch, capsys
 ):
     monkeypatch.setattr(settings_module, "device_available", lambda device: True)
+    monkeypatch.setitem(sys.modules, "mlx_vlm", SimpleNamespace())
     write_settings(settings_path, library, f"allow_ocr = {str(allow_ocr).lower()}\n", device=device)
     directory = tmp_path / "cache" / "models"
     requested = []
 
     def download(model, target):
-        requested.append((model.name, target))
+        requested.append((model.name, model.repo_id, model.revision, target))
         (target / model.folder).mkdir(parents=True)
 
     real = DoclingConverter(model_directory=directory)
@@ -58,7 +68,7 @@ def test_download_and_preflight_agree_on_exact_models(
         "docling-layout-heron",
         "TableFormer",
         "DocumentFigureClassifier-v2.5",
-        "CodeFormulaV2",
+        "CodeFormulaV2 (MLX)" if device == "mps" else "CodeFormulaV2",
     ]
     if allow_ocr:
         expected.append("RapidOCR")
@@ -70,7 +80,15 @@ def test_download_and_preflight_agree_on_exact_models(
 
     output = capsys.readouterr()
     assert code == 0, output.err
-    assert requested == [(name, directory) for name in expected]
+    assert requested == [
+        (
+            name,
+            "mlx-community/CodeFormulaV2-mlx-bf16" if name == "CodeFormulaV2 (MLX)" else None,
+            "f29c446f17d772025137fabc11288f07769c316f" if name == "CodeFormulaV2 (MLX)" else None,
+            directory,
+        )
+        for name in expected
+    ]
     assert real.missing_models(device=device, ocr=allow_ocr) == []
     assert output.err == ""
     for name in expected:
@@ -91,6 +109,27 @@ def test_download_and_preflight_agree_on_exact_models(
     for name in expected:
         assert f"Skipped {name} (already present)" in output.out
     assert unrelated.read_bytes() == b"keep these weights"
+
+
+@pytest.mark.parametrize("command", ["parse", "download-models"])
+def test_missing_mlx_runtime_refuses_mps_before_anything_is_created(
+    command, run_parse, run_download, settings_path, library, converter, monkeypatch, tmp_path
+):
+    write_settings(settings_path, library, device="mps")
+    monkeypatch.setitem(
+        sys.modules,
+        "torch",
+        SimpleNamespace(backends=SimpleNamespace(mps=SimpleNamespace(is_available=lambda: True))),
+    )
+    monkeypatch.setitem(sys.modules, "mlx_vlm", None)
+
+    result = start_parse(run_parse) if command == "parse" else run_download()
+
+    assert_error(result, "settings_error", "mps", "mlx-vlm", "uv sync")
+    assert converter.model_checks == []
+    assert converter.calls == []
+    assert list(library.iterdir()) == []
+    assert not (tmp_path / "models").exists()
 
 
 def test_download_refuses_an_unavailable_device_without_fetching(

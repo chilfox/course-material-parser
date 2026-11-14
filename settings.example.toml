@@ -9,10 +9,14 @@ library_root = "~/course-library"
 
 # Required. Hardware Docling runs on, one of "cpu", "mps", "cuda". It is never chosen
 # automatically, and a device that isn't available is reported as an error.
-#   Apple Silicon macOS:       "mps" (the formula model still runs on CPU, because
-#                              Docling doesn't support MPS for it)
-#   Linux with an NVIDIA GPU:  "cuda"
-#   Linux without a GPU:       "cpu" (works, but long textbooks are slow)
+#   Apple Silicon macOS:       "mps" (GPU formulas via MLX, CPU table structure;
+#                              other stages use MPS, no formula CPU fallback)
+#   Linux with an NVIDIA GPU:  "cuda" (Docling's default formula dtype)
+#   Any supported machine:     "cpu" (float32 formulas, all stages on CPU)
+# All devices download layout (164 MB), tables (342 MB), and classifier (32 MB).
+# mps downloads pinned MLX CodeFormulaV2 (611 MB), not the PyTorch model.
+# cpu/cuda download PyTorch CodeFormulaV2 (610 MB), never the MLX model.
+# allow_ocr = true additionally downloads RapidOCR (61 MB).
 device = "mps"
 
 # Optional, default true. Set to false to forbid OCR on this machine. A PDF that looks
