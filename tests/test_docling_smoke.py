@@ -6,6 +6,7 @@ import pytest
 
 from conftest import FIXTURES, TEXT_LAYER_PDF
 from course_material_parser.docling_conversion import Converted, DoclingConverter
+from course_material_parser.settings import load_settings
 
 pytestmark = pytest.mark.docling
 
@@ -28,6 +29,12 @@ def test_mps_returns_formula_latex_without_cpu_fallback():
 
 def test_downloaded_models_cover_real_preflight():
     assert DoclingConverter().missing_models(device="cpu", ocr=True) == []
+
+
+def test_downloaded_models_cover_current_settings_real_preflight():
+    settings = load_settings()
+
+    assert DoclingConverter().missing_models(device=settings.device, ocr=settings.allow_ocr) == []
 
 
 def test_real_docling_returns_a_document_with_page_provenance():
