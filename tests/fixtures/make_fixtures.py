@@ -6,6 +6,7 @@ this only needs to run when a fixture must change.
 - ``text_layer.pdf``: two pages with a real text layer (a heading and a paragraph each).
 - ``image_only.pdf``: one page that is a single raster image of text and has no text
   layer, so it looks scanned to the text-layer pre-check.
+- ``formula.pdf``: one text-layer page with the display equation a/b = c/d.
 """
 
 import time
@@ -28,9 +29,12 @@ def _content_stream(heading: str, body: str) -> bytes:
     ).encode("latin-1")
 
 
-def write_text_layer_pdf(path: Path) -> None:
-    """Write a minimal multi-page PDF whose pages carry a Helvetica text layer."""
-    page_count = len(TEXT_PAGES)
+def write_text_layer_pdf(path: Path, *, formula: bool = False) -> None:
+    """Write a text-layer PDF, optionally with a centered display equation."""
+    pages = (
+        [("An equation", "The following relation compares two ratios:")] if formula else TEXT_PAGES
+    )
+    page_count = len(pages)
     # Object numbers: 1 catalog, 2 pages, 3 font, then (page, content) pairs.
     page_ids = [4 + 2 * i for i in range(page_count)]
     objects: dict[int, bytes] = {
@@ -42,8 +46,20 @@ def write_text_layer_pdf(path: Path) -> None:
         ).encode(),
         3: b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     }
-    for page_id, (heading, body) in zip(page_ids, TEXT_PAGES, strict=True):
+    for page_id, (heading, body) in zip(page_ids, pages, strict=True):
         stream = _content_stream(heading, body)
+        if formula:
+            stream += (
+                b"BT /F1 12 Tf 72 640 Td (Consider the following equation for a ratio.) Tj ET\n"
+                b"BT /F1 12 Tf 280 592 Td (a) Tj ET\n"
+                b"BT /F1 12 Tf 280 568 Td (b) Tj ET\n"
+                b"270 586 m 298 586 l S\n"
+                b"BT /F1 12 Tf 308 581 Td (=) Tj ET\n"
+                b"BT /F1 12 Tf 334 592 Td (c) Tj ET\n"
+                b"BT /F1 12 Tf 334 568 Td (d) Tj ET\n"
+                b"324 586 m 352 586 l S\n"
+                b"BT /F1 12 Tf 72 530 Td (The ratios on each side are equal.) Tj ET\n"
+            )
         objects[page_id] = (
             f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 {PAGE_WIDTH} {PAGE_HEIGHT}] "
             f"/Resources << /Font << /F1 3 0 R >> >> /Contents {page_id + 1} 0 R >>"
@@ -84,3 +100,4 @@ def write_image_only_pdf(path: Path) -> None:
 if __name__ == "__main__":
     write_text_layer_pdf(FIXTURES_DIR / "text_layer.pdf")
     write_image_only_pdf(FIXTURES_DIR / "image_only.pdf")
+    write_text_layer_pdf(FIXTURES_DIR / "formula.pdf", formula=True)

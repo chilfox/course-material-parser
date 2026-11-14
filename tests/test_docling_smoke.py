@@ -1,11 +1,29 @@
 """Opt-in smoke test that runs real Docling (``pytest -m docling``)."""
 
+import platform
+
 import pytest
 
-from conftest import TEXT_LAYER_PDF
+from conftest import FIXTURES, TEXT_LAYER_PDF
 from course_material_parser.docling_conversion import Converted, DoclingConverter
 
 pytestmark = pytest.mark.docling
+
+
+@pytest.mark.skipif(
+    platform.system() != "Darwin" or platform.machine() != "arm64",
+    reason="MLX requires Apple Silicon macOS",
+)
+def test_mps_returns_formula_latex_without_cpu_fallback():
+    converter = DoclingConverter()
+    assert converter.missing_models(device="mps", ocr=False) == []
+    outcome = converter.convert(FIXTURES / "formula.pdf", device="mps", ocr=False)
+
+    assert isinstance(outcome, Converted), outcome
+    formulas = [
+        item.text for item, _ in outcome.document.iterate_items() if item.label == "formula"
+    ]
+    assert formulas == [r"\frac { a } { b } \, = \, \frac { c } { d }"]
 
 
 def test_downloaded_models_cover_real_preflight():

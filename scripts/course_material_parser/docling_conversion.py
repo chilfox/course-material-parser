@@ -71,22 +71,37 @@ def load_document(path: Path) -> DoclingDocument:
     return DoclingDocument.load_from_json(path)
 
 
+MLX_FORMULA_REPO = "mlx-community/CodeFormulaV2-mlx-bf16"
+MLX_FORMULA_REVISION = "f29c446f17d772025137fabc11288f07769c316f"
+
+
 @dataclass(frozen=True)
 class Model:
     """A model's human-readable name and folder in Docling's model directory."""
 
     name: str
     folder: str
+    repo_id: str | None = None
+    revision: str | None = None
 
 
 def required_models(*, device: str, ocr: bool) -> tuple[Model, ...]:
     """Return the models conversion loads on ``device``, with OCR only if requested."""
-    # MPS still runs CodeFormulaV2 through Transformers on CPU.
+    formula = (
+        Model(
+            "CodeFormulaV2 (MLX)",
+            MLX_FORMULA_REPO.replace("/", "--"),
+            MLX_FORMULA_REPO,
+            MLX_FORMULA_REVISION,
+        )
+        if device == "mps"
+        else Model("CodeFormulaV2", "docling-project--CodeFormulaV2")
+    )
     models = (
         Model("docling-layout-heron", "docling-project--docling-layout-heron"),
         Model("TableFormer", "docling-project--docling-models"),
         Model("DocumentFigureClassifier-v2.5", "docling-project--DocumentFigureClassifier-v2.5"),
-        Model("CodeFormulaV2", "docling-project--CodeFormulaV2"),
+        formula,
     )
     if ocr:
         models += (Model("RapidOCR", "RapidOcr"),)
@@ -107,6 +122,15 @@ def download_model(model: Model, directory: Path) -> None:
     from docling.utils.model_downloader import download_models
 
     with _console_silenced():
+        if model.repo_id is not None:
+            from huggingface_hub import snapshot_download
+
+            snapshot_download(
+                repo_id=model.repo_id,
+                revision=model.revision,
+                local_dir=directory / model.folder,
+            )
+            return
         if model.name == "docling-layout-heron":
             spec = LayoutObjectDetectionOptions().model_spec
             download_hf_model(
@@ -153,8 +177,8 @@ class DoclingConverter:
         """Convert ``pdf`` with formula enrichment on and return the outcome.
 
         Models come from the ``download-models`` directory, so conversion
-        works offline. With ``device = "mps"`` the formula model runs on CPU, because
-        Docling doesn't support MPS for CodeFormulaV2. An exception raised inside Docling
+        works offline. With ``device = "mps"`` the formula model uses MLX on the GPU,
+        without a CPU fallback. An exception raised inside Docling
         is reported as ``ConversionFailed``.
         """
         try:
@@ -169,7 +193,12 @@ class DoclingConverter:
         from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
         from docling.datamodel.base_models import ConversionStatus, InputFormat
         from docling.datamodel.pipeline_options import CodeFormulaVlmOptions, PdfPipelineOptions
-        from docling.datamodel.vlm_engine_options import TransformersVlmEngineOptions
+        from docling.datamodel.stage_model_specs import EngineModelConfig
+        from docling.datamodel.vlm_engine_options import (
+            MlxVlmEngineOptions,
+            TransformersVlmEngineOptions,
+            VlmEngineType,
+        )
         from docling.document_converter import DocumentConverter, PdfFormatOption
 
         accelerator = AcceleratorDevice(device)
@@ -179,7 +208,16 @@ class DoclingConverter:
             do_ocr=ocr,
             do_formula_enrichment=True,
         )
-        if accelerator in (AcceleratorDevice.CPU, AcceleratorDevice.MPS):
+        if accelerator is AcceleratorDevice.MPS:
+            formula = CodeFormulaVlmOptions.from_preset(
+                "codeformulav2", engine_options=MlxVlmEngineOptions()
+            )
+            formula.model_spec.engine_overrides = {
+                **formula.model_spec.engine_overrides,
+                VlmEngineType.MLX: EngineModelConfig(repo_id=MLX_FORMULA_REPO),
+            }
+            options.code_formula_options = formula
+        elif accelerator is AcceleratorDevice.CPU:
             options.code_formula_options = CodeFormulaVlmOptions.from_preset(
                 "codeformulav2",
                 engine_options=TransformersVlmEngineOptions(
